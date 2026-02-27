@@ -75,8 +75,8 @@ async function loadGiftedSession() {
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
     if (fs.existsSync(credsPath)) return true;
 
-    if (config.SESSION_ID && config.SESSION_ID.startsWith("NOVA~")) {
-        const compressedBase64 = config.SESSION_ID.substring("NOVA~".length);
+    if (config.SESSION_ID && config.SESSION_ID.startsWith("NOVA;;;")) {
+        const compressedBase64 = config.SESSION_ID.substring("NOVA;;;".length);
         try {
             const compressedBuffer = Buffer.from(compressedBase64, 'base64');
             if (compressedBuffer[0] === 0x1f && compressedBuffer[1] === 0x8b) {
