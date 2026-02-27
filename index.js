@@ -135,7 +135,7 @@ async function connectToWA() {
       const { connection, lastDisconnect, qr } = update
 
       if (qr) {
-        console.log('[ 📱 ] QR Code generated. Please scan with WhatsApp.')
+        console.log('[ 🔁 ] QR Code generated. Please scan with WhatsApp.')
         qrcode.generate(qr, { small: true })
       }
 
