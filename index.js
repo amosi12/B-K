@@ -33,8 +33,8 @@ const GroupEvents = require('./lib/groupevents')
 const qrcode = require('qrcode-terminal')
 const StickersTypes = require('wa-sticker-formatter')
 const util = require('util')
-const { promisify } = require('util') // Added for session decompression
-const zlib = require('zlib') // Added for session decompression
+const { promisify } = require('util')
+const zlib = require('zlib')
 const { sms, downloadMediaMessage, AntiDelete } = require('./lib')
 const FileType = require('file-type')
 const axios = require('axios')
@@ -48,7 +48,7 @@ const prefix = config.PREFIX
 
 const ownerNumber = ['255767862457']
 
-// Logger shim to match your snippet's requirements
+// Logger shim
 const cmdLogger = {
   info: (msg) => console.log(`[ INFO ] ${msg}`),
   success: (msg) => console.log(`[ SUCCESS ] ${msg}`),
@@ -63,10 +63,10 @@ if (!fs.existsSync(tempDir)) {
 
 const clearTempDir = () => {
   fs.readdir(tempDir, (err, files) => {
-    if (err) throw err
+    if (err) return
     for (const file of files) {
       fs.unlink(path.join(tempDir, file), err => {
-        if (err) throw err
+        if (err) return
       })
     }
   })
@@ -75,7 +75,7 @@ const clearTempDir = () => {
 // Clear the temp directory every 5 minutes
 setInterval(clearTempDir, 5 * 60 * 1000)
 
-//===================SESSION-AUTH (UPDATED TO NOVA~ FORMAT)============================
+//=================== FIXED SESSION-AUTH ============================
 const sessionDir = path.join(__dirname, 'sessions');
 const credsPath = path.join(sessionDir, 'creds.json');
 
@@ -83,20 +83,26 @@ async function loadGiftedSession() {
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
     if (fs.existsSync(credsPath)) return true;
 
-    if (config.SESSION_ID && config.SESSION_ID.startsWith("NOVA~")) {
-        const compressedBase64 = config.SESSION_ID.substring("NOVA~".length);
+    if (config.SESSION_ID && config.SESSION_ID.includes("NOVA~")) {
+        // Fix: Better extraction of the base64 string
+        const compressedBase64 = config.SESSION_ID.trim().split("NOVA~")[1];
         try {
             const compressedBuffer = Buffer.from(compressedBase64, 'base64');
-            // Check for GZIP magic numbers
-            if (compressedBuffer[0] === 0x1f && compressedBuffer[1] === 0x8b) {
-                const gunzip = promisify(zlib.gunzip);
-                const decompressedBuffer = await gunzip(compressedBuffer);
-                await fs.promises.writeFile(credsPath, decompressedBuffer.toString('utf-8'));
-                cmdLogger.success("Session restored from NOVA~ format ✅");
-                return true;
+            const gunzip = promisify(zlib.gunzip);
+            const inflate = promisify(zlib.inflate);
+            
+            let decompressedBuffer;
+            try {
+                decompressedBuffer = await gunzip(compressedBuffer);
+            } catch {
+                decompressedBuffer = await inflate(compressedBuffer);
             }
+            
+            await fs.promises.writeFile(credsPath, decompressedBuffer.toString('utf-8'));
+            cmdLogger.success("Session restored from NOVA~ format ✅");
+            return true;
         } catch (error) { 
-            cmdLogger.error("Failed to decompress session ID");
+            cmdLogger.error("Failed to decompress session ID. Check if the ID is complete.");
             return false; 
         }
     } else {
@@ -109,17 +115,15 @@ const express = require("express")
 const app = express()
 const port = process.env.PORT || 9090
 
-//=============================================
-// Status reactions cache (for rate limiting)
 const statusReactCache = new Map();
-const statusReactCooldown = 3000; // 3 seconds between reactions
+const statusReactCooldown = 3000; 
 
 async function connectToWA() {
   try {
     await loadGiftedSession();
     cmdLogger.info("Connecting to WhatsApp ⏳️...");
 
-    const { state, saveCreds } = await useMultiFileAuthState(__dirname + '/sessions/')
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir)
     const { version } = await fetchLatestBaileysVersion()
 
     const conn = makeWASocket({
@@ -198,7 +202,7 @@ async function connectToWA() {
         }
       }
     })
-    // Function to get the current date and time in Tanzania
+
 function getCurrentDateTimeParts() {
     const options = {
         timeZone: 'Africa/Nairobi',
@@ -229,10 +233,9 @@ function getCurrentDateTimeParts() {
     return { date, time };
 }
 
-// Auto Bio Update Interval
 setInterval(async () => {
     if (config.AUTO_BIO === "true") {
-        const { date, time } = getCurrentDateTimeParts(); // Get separated date and time
+        const { date, time } = getCurrentDateTimeParts();
         const bioText = `🛡️ Nova Xmd Bot 🤖 Live Now\n📅 ${date}\n⏰ ${time}`;
         try {
             await conn.setStatus(bioText);
@@ -241,12 +244,11 @@ setInterval(async () => {
             console.error("Failed to update Bio:", err);
         }
     }
-}, 60000); // Update kila dakika 1
+}, 60000);
 
 
     conn.ev.on('creds.update', saveCreds)
 
-    //==============================
     conn.ev.on('messages.update', async updates => {
       for (const update of updates) {
         if (update.update.message === null) {
@@ -255,11 +257,9 @@ setInterval(async () => {
         }
       }
     })
-    //============================== 
 
     conn.ev.on("group-participants.update", (update) => GroupEvents(conn, update))	  
 	  
-    //============= MAIN MESSAGE HANDLER ========
     conn.ev.on('messages.upsert', async(mek) => {
       mek = mek.messages[0]
       if (!mek.message) return
@@ -268,28 +268,20 @@ setInterval(async () => {
         ? mek.message.ephemeralMessage.message 
         : mek.message
       
-      // ✅ FIXED: SPECIAL HANDLING FOR STATUS BROADCAST (LIKE BMB)
       if (mek.key && mek.key.remoteJid === 'status@broadcast') {
         
-        // 1. Auto-read status
         if (config.AUTO_STATUS_SEEN === "true") {
           await conn.readMessages([mek.key])
           console.log(`📖 Status seen from: ${mek.key.participant}`)
         }
         
-        // 2. Auto-react to status (FIXED LIKE BMB)
         if (config.AUTO_STATUS_REACT === "true") {
-          
-          // Rate limiting - prevent overflow
           const now = Date.now()
           const lastReact = statusReactCache.get(mek.key.participant) || 0
           
           if (now - lastReact > statusReactCooldown) {
             try {
-              // Get bot's JID properly
               const botJid = conn.user.id.split(':')[0] + '@s.whatsapp.net'
-              
-              // Emoji selection logic (like BMB)
               const emojiMap = {
                 "hello": ["👋", "🙂", "😊", "👋🏽"],
                 "hi": ["👋", "🙂", "😊", "👋🏻"],
@@ -313,7 +305,6 @@ setInterval(async () => {
                 "party": ["🎉", "🥳", "🎊", "🪅"]
               }
 
-              // Fallback emojis (like BMB's extensive list)
               const fallbackEmojis = [
                 '🌼', '❤️', '💐', '🔥', '🏵️', '❄️', '🧊', '🐳', '💥', '🥀', '❤‍🔥', '🥹', '😩', '🫣', 
                 '🤭', '👻', '👾', '🫶', '😻', '🙌', '🫂', '🫀', '👩‍🦰', '🧑‍🦰', '👩‍⚕️', '🧑‍⚕️', '🧕', 
@@ -322,7 +313,7 @@ setInterval(async () => {
                 '💍', '👝', '💼', '🎒', '🥽', '🐻', '🐼', '🐭', '🐣', '🪿', '🦆', '🦊', '🦋', '🦄', 
                 '🪼', '🐋', '🐳', '🦈', '🐍', '🕊️', '🦦', '🦚', '🌱', '🍃', '🎍', '🌿', '☘️', '🍀', 
                 '🍁', '🪺', '🍄', '🍄‍🟫', '🪸', '🪨', '🌺', '🪷', '🪻', '🥀', '🌹', '🌷', '💐', '🌾', 
-                '🌸', '🌼', '🌻', '🌝', '🌚', '🌕', '🌎', '💫', '🔥', '☃️', '❄️', '🌨️', '🫧', '🍟', 
+                '🌸', '🌼', '🌻', '🌻', '🌝', '🌚', '🌕', '🌎', '💫', '🔥', '☃️', '❄️', '🌨️', '🫧', '🍟', 
                 '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', '🎗️', '🤹', '🤹‍♀️', '🎧', '🎤', 
                 '🥁', '🧩', '🎯', '🚀', '🚁', '🗿', '🎙️', '⌛', '⏳', '💸', '💎', '⚙️', '⛓️', '🔪', 
                 '🧸', '🎀', '🪄', '🎈', '🎁', '🎉', '🏮', '🪩', '📩', '💌', '📤', '📦', '📊', '📈', 
@@ -332,10 +323,8 @@ setInterval(async () => {
                 '⚪', '🟤', '🔇', '🔊', '📢', '🔕', '♥️', '🕐', '🚩', '🇵🇰', '🇹🇿', '🇰🇪', '🇺🇬', '🇷🇼'
               ]
 
-              // Function to get emoji based on status text (like BMB)
               const getEmojiForStatus = (statusText) => {
                 if (!statusText) return fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)]
-                
                 const words = statusText.toLowerCase().split(/\s+/)
                 for (const word of words) {
                   const emojis = emojiMap[word]
@@ -346,7 +335,6 @@ setInterval(async () => {
                 return fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)]
               }
 
-              // Get status text if available
               let statusText = ''
               if (mek.message.conversation) {
                 statusText = mek.message.conversation
@@ -358,35 +346,26 @@ setInterval(async () => {
                 statusText = mek.message.videoMessage.caption
               }
 
-              // Select emoji
               const selectedEmoji = getEmojiForStatus(statusText)
               
-              // Send reaction with proper statusJidList (CRITICAL for status reactions!)
               await conn.sendMessage('status@broadcast', {
                 react: {
                   text: selectedEmoji,
                   key: mek.key
                 }
               }, { 
-                statusJidList: [mek.key.participant, botJid] // ✅ This makes it work on status!
+                statusJidList: [mek.key.participant, botJid]
               })
 
-              // Update cache
               statusReactCache.set(mek.key.participant, now)
-              
               console.log(`✅ Status reaction sent: ${selectedEmoji} to ${mek.key.participant}`)
-              if (statusText) console.log(`📝 Status text: "${statusText.substring(0, 50)}..."`)
               
             } catch (reactError) {
               console.error('❌ Status react error:', reactError.message)
-              // Don't throw - we don't want to break other handlers
             }
-          } else {
-            console.log(`⏱️ Rate limited: ${mek.key.participant} (${now - lastReact}ms since last)`)
           }
         }
         
-        // 3. Auto-reply to status (optional)
         if (config.AUTO_STATUS_REPLY === "true") {
           try {
             const user = mek.key.participant
@@ -397,21 +376,15 @@ setInterval(async () => {
             console.error('❌ Status reply error:', replyError.message)
           }
         }
-        
-        // ✅ IMPORTANT: Return early to prevent normal message handling for status
         return
       }
-      
-      // ===========================================================
-      // NORMAL MESSAGE HANDLING (for non-status messages)
-      // ===========================================================
       
       if(mek.message.viewOnceMessageV2) {
         mek.message = (getContentType(mek.message) === 'ephemeralMessage') ? mek.message.ephemeralMessage.message : mek.message
       }
       
       if (config.READ_MESSAGE === 'true') {
-        await conn.readMessages([mek.key])  // Mark message as read
+        await conn.readMessages([mek.key]) 
         console.log(`Marked message from ${mek.key.remoteJid} as read.`)
       }
       
@@ -425,10 +398,9 @@ setInterval(async () => {
       const from = mek.key.remoteJid
       const quoted = type == 'extendedTextMessage' && mek.message.extendedTextMessage.contextInfo != null ? mek.message.extendedTextMessage.contextInfo.quotedMessage || [] : []
       const body = (type === 'conversation') ? mek.message.conversation : (type === 'extendedTextMessage') ? mek.message.extendedTextMessage.text : (type == 'imageMessage') && mek.message.imageMessage.caption ? mek.message.imageMessage.caption : (type == 'videoMessage') && mek.message.videoMessage.caption ? mek.message.videoMessage.caption : ''
-        // ✅ FIXED: Using config.PREFIX directly for dynamic updates
-  const isCmd = body.startsWith(config.PREFIX)
-  var budy = typeof mek.text == 'string' ? mek.text : false;
-  const command = isCmd ? body.slice(config.PREFIX.length).trim().split(' ').shift().toLowerCase() : ''
+      const isCmd = body.startsWith(config.PREFIX)
+      var budy = typeof mek.text == 'string' ? mek.text : false;
+      const command = isCmd ? body.slice(config.PREFIX.length).trim().split(' ').shift().toLowerCase() : ''
       const args = body.trim().split(/ +/).slice(1)
       const q = args.join(' ')
       const text = args.join(' ')
@@ -495,15 +467,12 @@ setInterval(async () => {
         return
       }
       
-      //================ownerreact==============
       if (senderNumber.includes("255741752020") && !isReact) {
         const reactions = ["👑", "🥳", "📊", "⚙️", "🧠", "🎯", "✨", "🔑", "🏆", "👻", "🎉", "💗", "❤️", "😜", "🌼", "🏵️", ,"💐", "🔥", "❄️", "🌝", "🌟", "🐥", "🧊"]
         const randomReaction = reactions[Math.floor(Math.random() * reactions.length)]
         m.react(randomReaction)
       }
 
-      //==========public react============//
-      // Auto React for normal messages only (NOT status)
       if (!isReact && config.AUTO_REACT === 'true' && from !== 'status@broadcast') {
         const reactions = [
           '🌼', '❤️', '💐', '🔥', '🏵️', '❄️', '🧊', '🐳', '💥', '🥀', '❤‍🔥', '🥹', '😩', '🫣', 
@@ -527,20 +496,16 @@ setInterval(async () => {
         m.react(randomReaction)
       }
           
-      // Custom react for normal messages only (NOT status)
       if (!isReact && config.CUSTOM_REACT === 'true' && from !== 'status@broadcast') {
-        // Use custom emojis from the configuration (fallback to default if not set)
         const reactions = (config.CUSTOM_REACT_EMOJIS || '🙂,😔').split(',')
         const randomReaction = reactions[Math.floor(Math.random() * reactions.length)]
         m.react(randomReaction)
       }
         
-      //==========WORKTYPE============ 
       if(!isOwner && config.MODE === "private") return
       if(!isOwner && isGroup && config.MODE === "inbox") return
       if(!isOwner && !isGroup && config.MODE === "groups") return
    
-      // take commands 
       const events = require('./command')
       const cmdName = isCmd ? body.slice(1).trim().split(" ")[0].toLowerCase() : false
       if (isCmd) {
@@ -574,7 +539,7 @@ setInterval(async () => {
         }
       })
     })
-    //===================================================   
+
     conn.decodeJid = jid => {
       if (!jid) return jid
       if (/:\d+@/gi.test(jid)) {
@@ -587,7 +552,7 @@ setInterval(async () => {
         )
       } else return jid
     }
-    //===================================================
+
     conn.copyNForward = async(jid, message, forceForward = false, options = {}) => {
       let vtype
       if (options.readViewOnce) {
@@ -622,7 +587,7 @@ setInterval(async () => {
       await conn.relayMessage(jid, waMessage.message, { messageId: waMessage.key.id })
       return waMessage
     }
-    //=================================================
+
     conn.downloadAndSaveMediaMessage = async(message, filename, attachExtension = true) => {
       let quoted = message.msg ? message.msg : message
       let mime = (message.msg || message).mimetype || ''
@@ -634,11 +599,10 @@ setInterval(async () => {
       }
       let type = await FileType.fromBuffer(buffer)
       trueFileName = attachExtension ? (filename + '.' + type.ext) : filename
-      // save to file
       await fs.writeFileSync(trueFileName, buffer)
       return trueFileName
     }
-    //=================================================
+
     conn.downloadMediaMessage = async(message) => {
       let mime = (message.msg || message).mimetype || ''
       let messageType = message.mtype ? message.mtype.replace(/Message/gi, '') : mime.split('/')[0]
@@ -651,7 +615,6 @@ setInterval(async () => {
       return buffer
     }
     
-    //================================================
     conn.sendFileUrl = async (jid, url, caption, quoted, options = {}) => {
       let mime = ''
       let res = await axios.head(url)
@@ -673,9 +636,8 @@ setInterval(async () => {
         return conn.sendMessage(jid, { audio: await getBuffer(url), caption: caption, mimetype: 'audio/mpeg', ...options }, { quoted: quoted, ...options })
       }
     }
-    //==========================================================
+
     conn.cMod = (jid, copy, text = '', sender = conn.user.id, options = {}) => {
-      //let copy = message.toJSON()
       let mtype = Object.keys(copy.message)[0]
       let isEphemeral = mtype === 'ephemeralMessage'
       if (isEphemeral) {
@@ -700,11 +662,9 @@ setInterval(async () => {
       return proto.WebMessageInfo.fromObject(copy)
     }
     
-    //=====================================================
     conn.getFile = async(PATH, save) => {
       let res
       let data = Buffer.isBuffer(PATH) ? PATH : /^data:.*?\/.*?;base64,/i.test(PATH) ? Buffer.from(PATH.split `,` [1], 'base64') : /^https?:\/\//.test(PATH) ? await (res = await getBuffer(PATH)) : fs.existsSync(PATH) ? (filename = PATH, fs.readFileSync(PATH)) : typeof PATH === 'string' ? PATH : Buffer.alloc(0)
-      //if (!Buffer.isBuffer(data)) throw new TypeError('Result is not a buffer')
       let type = await FileType.fromBuffer(data) || {
         mime: 'application/octet-stream',
         ext: '.bin'
@@ -719,7 +679,7 @@ setInterval(async () => {
         data
       }
     }
-    //=====================================================
+
     conn.sendFile = async(jid, PATH, fileName, quoted = {}, options = {}) => {
       let types = await conn.getFile(PATH, true)
       let { filename, size, ext, mime, data } = types
@@ -746,16 +706,16 @@ setInterval(async () => {
       }, { quoted, ...options })
       return fs.promises.unlink(pathFile)
     }
-    //=====================================================
+
     conn.parseMention = async(text) => {
       return [...text.matchAll(/@([0-9]{5,16}|0)/g)].map(v => v[1] + '@s.whatsapp.net')
     }
-    //=====================================================
+
     conn.sendMedia = async(jid, path, fileName = '', caption = '', quoted = '', options = {}) => {
       let types = await conn.getFile(path, true)
       let { mime, ext, res, data, filename } = types
-      if (res && res.status !== 200 || file.length <= 65536) {
-        try { throw { json: JSON.parse(file.toString()) } } catch (e) { if (e.json) throw e.json }
+      if (res && res.status !== 200 || data.length <= 65536) {
+        try { throw { json: JSON.parse(data.toString()) } } catch (e) { if (e.json) throw e.json }
       }
       let type = '',
         mimetype = mime,
@@ -782,7 +742,6 @@ setInterval(async () => {
       return fs.promises.unlink(pathFile)
     }
     
-    //=====================================================
     conn.sendVideoAsSticker = async (jid, buff, options = {}) => {
       let buffer
       if (options && (options.packname || options.author)) {
@@ -796,7 +755,7 @@ setInterval(async () => {
         options
       )
     }
-    //=====================================================
+
     conn.sendImageAsSticker = async (jid, buff, options = {}) => {
       let buffer
       if (options && (options.packname || options.author)) {
@@ -810,19 +769,16 @@ setInterval(async () => {
         options
       )
     }
-    //=====================================================
+
     conn.sendTextWithMentions = async(jid, text, quoted, options = {}) => conn.sendMessage(jid, { text: text, contextInfo: { mentionedJid: [...text.matchAll(/@(\d{0,16})/g)].map(v => v[1] + '@s.whatsapp.net') }, ...options }, { quoted })
     
-    //=====================================================
     conn.sendImage = async(jid, path, caption = '', quoted = '', options) => {
       let buffer = Buffer.isBuffer(path) ? path : /^data:.*?\/.*?;base64,/i.test(path) ? Buffer.from(path.split `,` [1], 'base64') : /^https?:\/\//.test(path) ? await (await getBuffer(path)) : fs.existsSync(path) ? fs.readFileSync(path) : Buffer.alloc(0)
       return await conn.sendMessage(jid, { image: buffer, caption: caption, ...options }, { quoted })
     }
     
-    //=====================================================
     conn.sendText = (jid, text, quoted = '', options) => conn.sendMessage(jid, { text: text, ...options }, { quoted })
     
-    //=====================================================
     conn.sendButtonText = (jid, buttons = [], text, footer, quoted = '', options = {}) => {
       let buttonMessage = {
         text,
@@ -831,10 +787,9 @@ setInterval(async () => {
         headerType: 2,
         ...options
       }
-      //========================================================================================================================================
       conn.sendMessage(jid, buttonMessage, { quoted, ...options })
     }
-    //=====================================================
+
     conn.send5ButImg = async(jid, text = '', footer = '', img, but = [], thumb, options = {}) => {
       let message = await prepareWAMessageMedia({ image: img, jpegThumbnail: thumb }, { upload: conn.waUploadToServer })
       var template = generateWAMessageFromContent(jid, proto.Message.fromObject({
@@ -850,104 +805,46 @@ setInterval(async () => {
       conn.relayMessage(jid, template.message, { messageId: template.key.id })
     }
     
-    //=====================================================
     conn.getName = (jid, withoutContact = false) => {
-      id = conn.decodeJid(jid)
-
+      let id = conn.decodeJid(jid)
       withoutContact = conn.withoutContact || withoutContact
-
       let v
-
       if (id.endsWith('@g.us'))
         return new Promise(async resolve => {
           v = store.contacts[id] || {}
-
-          if (!(v.name.notify || v.subject))
-            v = conn.groupMetadata(id) || {}
-
-          resolve(
-            v.name ||
-              v.subject ||
-              PhoneNumber(
-                '+' + id.replace('@s.whatsapp.net', ''),
-              ).getNumber('international'),
-          )
+          if (!(v.name || v.subject)) v = conn.groupMetadata(id) || {}
+          resolve(v.name || v.subject || id.replace('@s.whatsapp.net', ''))
         })
       else
-        v =
-          id === '0@s.whatsapp.net'
-            ? {
-                id,
-                name: 'WhatsApp',
-              }
-            : id === conn.decodeJid(conn.user.id)
-            ? conn.user
-            : store.contacts[id] || {}
+        v = id === '0@s.whatsapp.net' ? { id, name: 'WhatsApp' } : id === conn.decodeJid(conn.user.id) ? conn.user : store.contacts[id] || {}
 
-      return (
-        (withoutContact ? '' : v.name) ||
-        v.subject ||
-        v.verifiedName ||
-        PhoneNumber(
-          '+' + jid.replace('@s.whatsapp.net', ''),
-        ).getNumber('international')
-      )
+      return (withoutContact ? '' : v.name) || v.subject || v.verifiedName || jid.replace('@s.whatsapp.net', '')
     }
 
-    // Vcard Functionality
     conn.sendContact = async (jid, kon, quoted = '', opts = {}) => {
       let list = []
       for (let i of kon) {
         list.push({
           displayName: await conn.getName(i + '@s.whatsapp.net'),
-          vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await conn.getName(
-            i + '@s.whatsapp.net',
-          )}\nFN:${
-            global.OwnerName
-          }\nitem1.TEL;waid=${i}:${i}\nitem1.X-ABLabel:Click here to chat\nitem2.EMAIL;type=INTERNET:${
-            global.email
-          }\nitem2.X-ABLabel:GitHub\nitem3.URL:https://github.com/${
-            global.github
-          }/Wa-his-v1.0\nitem3.X-ABLabel:GitHub\nitem4.ADR:;;${
-            global.location
-          };;;;\nitem4.X-ABLabel:Region\nEND:VCARD`,
+          vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await conn.getName(i + '@s.whatsapp.net')}\nFN:${global.OwnerName}\nitem1.TEL;waid=${i}:${i}\nitem1.X-ABLabel:Click here to chat\nEND:VCARD`,
         })
       }
-      conn.sendMessage(
-        jid,
-        {
-          contacts: {
-            displayName: `${list.length} Contact`,
-            contacts: list,
-          },
-          ...opts,
-        },
-        { quoted },
-      )
+      conn.sendMessage(jid, { contacts: { displayName: `${list.length} Contact`, contacts: list }, ...opts }, { quoted })
     }
-    // Status aka brio
+
     conn.setStatus = status => {
       conn.query({
         tag: 'iq',
-        attrs: {
-          to: '@s.whatsapp.net',
-          type: 'set',
-          xmlns: 'status',
-        },
-        content: [
-          {
-            tag: 'status',
-            attrs: {},
-            content: Buffer.from(status, 'utf-8'),
-          },
-        ],
+        attrs: { to: '@s.whatsapp.net', type: 'set', xmlns: 'status' },
+        content: [{ tag: 'status', attrs: {}, content: Buffer.from(status, 'utf-8') }],
       })
       return status
     }
+
     conn.serializeM = mek => sms(conn, mek, store)
   } catch (error) {
     console.error('Error in connectToWA:', error)
-    setTimeout(() => connectToWA(), 5000) // Retry after 5 seconds
+    setTimeout(() => connectToWA(), 5000)
   }
 }
   
@@ -955,9 +852,8 @@ app.get("/", (req, res) => {
   res.send("NOVA XMD STARTED ✅")
 })
 
-// Anti-crash handler
 process.on("uncaughtException", (err) => {
-  console.error("[❗] Uncaught Exception:", err.stack || err);
+  console.error("[❗] Uncaught Exception:", err);
 });
 
 process.on("unhandledRejection", (reason, p) => {
