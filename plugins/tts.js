@@ -37,7 +37,7 @@ const newsletterContext = {
 cmd({
   pattern: "trt",
   alias: ["translate", "trad", "tafsiri"],
-  react: "💗",
+  react: "🌎",
   desc: "Translate text to different languages.",
   category: "conversion",
   filename: __filename
@@ -83,9 +83,6 @@ cmd({
     // Translate the text
     const targetLang = args[0].toLowerCase();
     const translatedText = await traduire(textToTranslate, { to: targetLang });
-
-    // Detect original language (optional - translatte can auto-detect)
-    const originalLang = args[1] || "auto";
 
     // Prepare response
     const response = 
