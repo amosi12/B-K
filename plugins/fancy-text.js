@@ -1,5 +1,9 @@
 const axios = require("axios");
 const { cmd } = require("../command");
+const fancy = require("../lib/style");
+
+const pkg = require("@whiskeysockets/baileys");
+const { generateWAMessageFromContent, proto } = pkg;
 
 // Verified Contact Context
 const quotedContact = {
@@ -11,7 +15,12 @@ const quotedContact = {
   message: {
     contactMessage: {
       displayName: "B.M.B VERIFIED ✅",
-      vcard: "BEGIN:VCARD\nVERSION:3.0\nFN:B.M.B VERIFIED ✅\nORG:BMB-TECH BOT;\nTEL;type=CELL;type=VOICE;waid=255767862457:+255 767 862457\nEND:VCARD"
+      vcard: `BEGIN:VCARD
+VERSION:3.0
+FN:B.M.B VERIFIED ✅
+ORG:BMB-TECH BOT;
+TEL;type=CELL;type=VOICE;waid=255767862457:+255 767 862457
+END:VCARD`
     }
   }
 };
@@ -20,41 +29,83 @@ cmd({
   pattern: "fancy",
   alias: ["font", "style"],
   react: "✍️",
-  desc: "Convert text into various fonts.",
-  category: "download",
+  desc: "Convert text into various fonts with copy button.",
+  category: "fun",
   filename: __filename
-}, async (conn, m, store, { from, quoted, args, q, reply }) => {
+}, async (conn, m, store, { from, quoted, args, q, reply, prefix }) => {
   try {
-    if (!q) {
-      return reply("❎ *Please provide text to convert into fancy fonts.*\n\n_Example:_ `.fancy Hello`");
+    const id = args[0]?.match(/\d+/)?.join("");
+    const text = args.slice(1).join(" ");
+
+    // Hakuna ID au text → onyesha list
+    if (!id || !text) {
+      return await conn.sendMessage(
+        from,
+        {
+          text: `📝 *Example:* ${prefix}fancy 10 Hello World\n\n` + fancy.list("Nova Xmd", fancy)
+        },
+        { quoted: quotedContact }
+      );
     }
 
-    const apiUrl = `https://www.dark-yasiya-api.site/other/font?text=${encodeURIComponent(q)}`;
-    const response = await axios.get(apiUrl);
+    const selectedStyle = fancy[parseInt(id) - 1];
+    const resultText = selectedStyle
+      ? fancy.apply(selectedStyle, text)
+      : "❌ Style not found";
 
-    if (!response.data.status) {
-      return reply("❌ *Error fetching fonts. Please try again later.*");
+    if (!selectedStyle) {
+      return reply("❌ Style not found. Please check the style number.");
     }
 
-    const fonts = response.data.result.map(item => `╭─── ${item.name} ───⬣\n${item.result}`).join("\n\n");
+    // 🔘 COPY BUTTON
+    const buttons = [
+      {
+        name: "cta_copy",
+        buttonParamsJson: JSON.stringify({
+          display_text: "📋 COPY TEXT",
+          copy_code: resultText
+        })
+      }
+    ];
 
-    const resultText = `╭─❏ *Fancy Fonts Generator*\n│\n│ ✏️ *Input:* ${q}\n╰──────────────⬣\n\n${fonts}\n\n╭───〔 Powered by 𝙽𝙾𝚅𝙰 ┃ 𝚇𝙼𝙳 〕───⬣`;
-
-    await conn.sendMessage(from, {
-      text: resultText,
-      contextInfo: {
-        forwardingScore: 999,
-        isForwarded: true,
-        forwardedNewsletterMessageInfo: {
-          newsletterJid: "120363382023564830@newsletter",
-          newsletterName: "𝙽𝙾𝚅𝙰-𝚇𝙼𝙳",
-          serverMessageId: 12
+    const viewOnceMessage = {
+      viewOnceMessage: {
+        message: {
+          messageContextInfo: {
+            deviceListMetadata: {},
+            deviceListMetadataVersion: 2
+          },
+          interactiveMessage: proto.Message.InteractiveMessage.create({
+            body: proto.Message.InteractiveMessage.Body.create({
+              text: resultText
+            }),
+            footer: proto.Message.InteractiveMessage.Footer.create({
+              text: "⚡ Powered by 𝙽𝙾𝚅𝙰 𝚇𝙼𝙳"
+            }),
+            header: proto.Message.InteractiveMessage.Header.create({
+              title: "✨ Fancy Font Generator",
+              subtitle: `Style #${id}`,
+              hasMediaAttachment: false
+            }),
+            nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+              buttons
+            })
+          })
         }
       }
-    }, { quoted: quotedContact });
+    };
+
+    const waMsg = generateWAMessageFromContent(from, viewOnceMessage, {
+      userJid: conn.user.id,
+      quoted: quotedContact // Tumia quotedContact kama quoted
+    });
+
+    await conn.relayMessage(from, waMsg.message, {
+      messageId: waMsg.key.id
+    });
 
   } catch (error) {
     console.error("❌ Error in fancy command:", error);
-    reply("⚠️ *An error occurred while fetching fancy fonts.*");
+    reply("⚠️ *An error occurred while processing your request.*");
   }
 });
