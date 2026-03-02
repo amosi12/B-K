@@ -80,7 +80,8 @@ cmd({
     const memoryUsage = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
 
     // ===== HEADER WITH NEW STYLE =====
-    let menu = `╔════ INFO ════╗
+    let menu = `
+    ╔════ INFO ════╗
       ▸ User    : ${config.OWNER_NAME}
       ▸ Bot     : ${config.BOT_NAME || 'NOVA XMD'}
       ▸ Mode    : ${config.MODE || 'PUBLIC'}
@@ -123,7 +124,6 @@ cmd({
     // ===== FOOTER =====
     menu += `\n                  
 ╚══════════════════╝
-✨ *NOVA XMD* - Multi Device WhatsApp Bot
 📌 *TOTAL COMMANDS:* ${commands.length}
 > Powered By *Bmb Tech Bot*`;
 
