@@ -2,7 +2,7 @@ const { cmd, commands } = require('../command');
 const config = require('../config');
 const fs = require('fs');
 
-// Quoted Contact Message
+// VCard Contact
 const quotedContact = {
   key: {
     fromMe: false,
@@ -22,45 +22,62 @@ END:VCARD`
   }
 };
 
-// Newsletter Context
-const newsletterJid = config.NEWSLETTER_JID || "120363382023564830@newsletter";
-const newsletterName = config.NEWSLETTER_NAME || "𝘽.𝙈.𝘽-𝙓𝙈𝘿";
+// Context ya newsletter
+const contextInfo = {
+  forwardingScore: 999,
+  isForwarded: true,
+  forwardedNewsletterMessageInfo: {
+    newsletterJid: config.NEWSLETTER_JID || "120363382023564830@newsletter",
+    newsletterName: config.NEWSLETTER_NAME || "𝙱.𝙼.𝙱-𝚇𝙼𝙳",
+    serverMessageId: 1
+  }
+};
 
-// ============================================
-// COMMAND: SET PROFILE PICTURE
-// ============================================
+// SET PROFILE PICTURE
 cmd({
   pattern: "setpp",
-  alias: ["setprofile", "setpic", "setprofilepic"],
-  desc: "Change bot profile picture (reply to image)",
+  alias: ["setprofile", "profilepic"],
+  desc: "Change bot profile picture",
   category: "main",
   react: "📸",
   filename: __filename
-}, async (conn, mek, m, { from, quoted, reply, isOwner, sender }) => {
+},
+async (conn, mek, m, { from, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber, botNumberJid, pushName, reply }) => {
   try {
-    // Check if user is owner
-    if (!isOwner) {
-      return reply("🚫 *Only the owner can change the profile picture!*");
+    const userJid = sender;
+    const botJid = botNumberJid;
+    const ownerNumber = config.OWNER_NUMBER || 'default_owner_number';
+    const isOwner = userJid === `${ownerNumber}@s.whatsapp.net` || userJid === botJid;
+    const superUser = config.SUPER_USER?.includes(senderNumber) || false;
+
+    if (!isOwner && !superUser) {
+      return reply("🚫 *Only the bot owner can change the profile picture!*");
     }
 
-    // Check if replied to a message
-    if (!quoted) {
+    // Check if there's a quoted message
+    if (!m.quoted) {
       return reply("📸 *Please reply to an image with .setpp to set it as your profile picture!*");
     }
 
-    // Get image from quoted message
-    const imageMessage = 
-      quoted.message?.imageMessage || 
-      quoted.message?.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage ||
-      quoted.imageMessage;
+    // Get the image message from quoted message
+    const quotedMsg = m.quoted;
+    let imageMessage = null;
+    
+    if (quotedMsg.message) {
+      if (quotedMsg.message.imageMessage) {
+        imageMessage = quotedMsg.message.imageMessage;
+      } else if (quotedMsg.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage) {
+        imageMessage = quotedMsg.message.extendedTextMessage.contextInfo.quotedMessage.imageMessage;
+      }
+    }
 
     if (!imageMessage) {
       return reply("🚫 *The replied message isn't an image!*");
     }
 
-    // Download and set profile picture
-    const mediaPath = await conn.downloadAndSaveMediaMessage(quoted);
-    await conn.updateProfilePicture(conn.user.jid, { url: mediaPath });
+    // Download and update profile picture
+    const mediaPath = await conn.downloadAndSaveMediaMessage(imageMessage);
+    await conn.updateProfilePicture(userJid, { url: mediaPath });
     
     // Clean up temp file
     fs.unlink(mediaPath, err => {
@@ -70,168 +87,80 @@ cmd({
     // Success message
     const successMsg = `┏━━━━━━━━━━━━━━━━━━
 ┃ ✅ *Profile Picture Updated!*
-┃ 👤 *User:* @${sender.split('@')[0]}
-┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB-XMD'}
+┃ 👤 *User:* @${senderNumber}
+┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB BOT'}
 ┃ 🔧 *Status:* Success
 ┗━━━━━━━━━━━━━━━━━`;
 
-    await reply(successMsg, { mentions: [sender] });
+    await reply(successMsg);
 
   } catch (error) {
-    console.error("Error in setpp:", error);
+    console.error("Error updating profile picture:", error);
     await reply(`❌ *Failed to update profile picture:* ${error.message}`);
   }
 });
 
-// ============================================
-// COMMAND: GET PROFILE PICTURE
-// ============================================
+// GET PROFILE PICTURE
 cmd({
   pattern: "getpp",
-  alias: ["profile", "pp", "getprofile", "profilepic"],
-  desc: "Get profile picture of a user",
+  alias: ["getprofile", "profile"],
+  desc: "Get user profile picture",
   category: "main",
   react: "📷",
   filename: __filename
-}, async (conn, mek, m, { from, quoted, reply, sender, mentionedJid }) => {
+},
+async (conn, mek, m, { from, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber, botNumberJid, pushName, reply }) => {
   try {
-    // Determine target user
-    let targetUser = sender;
+    // Check if there's a quoted message
+    if (!m.quoted) {
+      return reply("❌ *Reply to someone's message to get their profile pic!*");
+    }
+
+    const quotedMsg = m.quoted;
+    let targetUser = null;
     
-    if (quoted) {
-      targetUser = quoted.sender || quoted.key?.participant;
-    } else if (mentionedJid && mentionedJid[0]) {
-      targetUser = mentionedJid[0];
+    // Get the user who sent the quoted message
+    if (quotedMsg.key && quotedMsg.key.participant) {
+      targetUser = quotedMsg.key.participant;
+    } else if (quotedMsg.participant) {
+      targetUser = quotedMsg.participant;
+    } else {
+      targetUser = sender; // fallback to sender
     }
 
     // Loading message
-    await reply(`🔁 *Loading profile picture for @${targetUser.split('@')[0]}...*`, 
-      { mentions: [targetUser] });
+    await reply(`🔁 *Loading profile picture...*`);
 
+    let ppuser;
     try {
-      // Get user's profile picture URL
-      let ppUrl = await conn.profilePictureUrl(targetUser, 'image');
-      
-      // Caption with box style
-      const captionBox = `┏━━━━━━━━━━━━━━━━━━
+      ppuser = await conn.profilePictureUrl(targetUser, 'image');
+    } catch (error) {
+      // If no profile pic, try to get bot's profile pic
+      try {
+        ppuser = await conn.profilePictureUrl(botNumberJid, 'image');
+        await reply(`🚫 *User has no profile picture or it's locked!*\n🖼️ *Showing bot profile instead...*`);
+      } catch (e) {
+        return reply("❌ *Could not fetch any profile picture!*");
+      }
+    }
+
+    // Format caption
+    const captionBox = `┏━━━━━━━━━━━━━━━━━━
 ┃ 🖼️ *Profile Picture*
 ┃ 👤 *User:* @${targetUser.split('@')[0]}
-┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB-XMD'}
+┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB BOT'}
 ┗━━━━━━━━━━━━━━━━━`;
 
-      // Send the profile picture
-      await conn.sendMessage(from, {
-        image: { url: ppUrl },
-        caption: captionBox,
-        mentions: [targetUser],
-        contextInfo: {
-          forwardingScore: 999,
-          isForwarded: true,
-          forwardedNewsletterMessageInfo: {
-            newsletterJid: newsletterJid,
-            newsletterName: newsletterName,
-            serverMessageId: 143
-          }
-        }
-      }, { quoted: quotedContact });
-
-    } catch (ppError) {
-      // User has no profile picture
-      await reply(`┏━━━━━━━━━━━━━━━━━━
-┃ 🚫 *Profile Picture Not Found!*
-┃ 👤 *User:* @${targetUser.split('@')[0]}
-┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB-XMD'}
-┃ 📝 *Note:* User has no profile picture
-┗━━━━━━━━━━━━━━━━━`, { mentions: [targetUser] });
-    }
+    // Send the profile picture
+    await conn.sendMessage(from, {
+      image: { url: ppuser },
+      caption: captionBox,
+      mentions: [targetUser],
+      contextInfo: contextInfo
+    }, { quoted: quotedContact });
 
   } catch (error) {
     console.error("Error in getpp:", error);
     await reply(`❌ *Error while fetching profile picture:* ${error.message}`);
-  }
-});
-
-// ============================================
-// COMMAND: DELETE PROFILE PICTURE
-// ============================================
-cmd({
-  pattern: "delpp",
-  alias: ["removepp", "deletepic", "removeprofile"],
-  desc: "Remove bot profile picture",
-  category: "main",
-  react: "🗑️",
-  filename: __filename
-}, async (conn, mek, m, { from, reply, isOwner }) => {
-  try {
-    // Check if user is owner
-    if (!isOwner) {
-      return reply("🚫 *Only the owner can delete the profile picture!*");
-    }
-
-    // Remove profile picture
-    await conn.removeProfilePicture(conn.user.jid);
-    
-    // Success message
-    await reply(`┏━━━━━━━━━━━━━━━━━━
-┃ ✅ *Profile Picture Removed!*
-┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB-XMD'}
-┃ 🔧 *Status:* Success
-┗━━━━━━━━━━━━━━━━━`);
-
-  } catch (error) {
-    console.error("Error in delpp:", error);
-    await reply(`❌ *Failed to delete profile picture:* ${error.message}`);
-  }
-});
-
-// ============================================
-// COMMAND: VIEW MY PROFILE PICTURE
-// ============================================
-cmd({
-  pattern: "mypp",
-  alias: ["myprofile", "mypic"],
-  desc: "View your own profile picture",
-  category: "main",
-  react: "👤",
-  filename: __filename
-}, async (conn, mek, m, { from, reply, sender }) => {
-  try {
-    await reply(`🔁 *Loading your profile picture...*`);
-
-    try {
-      let ppUrl = await conn.profilePictureUrl(sender, 'image');
-      
-      const captionBox = `┏━━━━━━━━━━━━━━━━━━
-┃ 🖼️ *Your Profile Picture*
-┃ 👤 *User:* @${sender.split('@')[0]}
-┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB-XMD'}
-┗━━━━━━━━━━━━━━━━━`;
-
-      await conn.sendMessage(from, {
-        image: { url: ppUrl },
-        caption: captionBox,
-        mentions: [sender],
-        contextInfo: {
-          forwardingScore: 999,
-          isForwarded: true,
-          forwardedNewsletterMessageInfo: {
-            newsletterJid: newsletterJid,
-            newsletterName: newsletterName,
-            serverMessageId: 143
-          }
-        }
-      }, { quoted: quotedContact });
-
-    } catch (ppError) {
-      await reply(`┏━━━━━━━━━━━━━━━━━━
-┃ 🚫 *You don't have a profile picture!*
-┃ 👤 *User:* @${sender.split('@')[0]}
-┃ 🤖 *Bot:* ${config.BOT_NAME || 'BMB-XMD'}
-┗━━━━━━━━━━━━━━━━━`, { mentions: [sender] });
-    }
-
-  } catch (error) {
-    console.error("Error in mypp:", error);
-    await reply(`❌ *Error:* ${error.message}`);
   }
 });
