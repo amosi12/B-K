@@ -30,7 +30,7 @@ cmd({
   alias: ["font", "style"],
   react: "✍️",
   desc: "Convert text into various fonts with copy button.",
-  category: "fun",
+  category: "main",
   filename: __filename
 }, async (conn, m, store, { from, quoted, args, q, reply, prefix }) => {
   try {
