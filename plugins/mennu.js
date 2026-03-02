@@ -14,12 +14,12 @@ const quotedContact = {
   },
   message: {
     contactMessage: {
-      displayName: "Bmb Tech Verified ✅",
+      displayName: "NOVA XMD VERIFIED ✅",
       vcard: `BEGIN:VCARD
 VERSION:3.0
 FN:NOVA XMD VERIFIED ✅
 ORG:NOVA XMD;
-TEL;type=CELL;type=VOICE;waid=255767862457}:+255767862457}
+TEL;type=CELL;type=VOICE;waid=${config.OWNER_NUMBER || '255767862457'}:+${config.OWNER_NUMBER || '255767862457'}
 END:VCARD`
     }
   }
@@ -80,12 +80,7 @@ cmd({
     const memoryUsage = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
 
     // ===== HEADER WITH NEW STYLE =====
-    let menu = `
-╔══════════════════╗
-║   NOVA XMD       
-╠══════════════════╣
-║                  
-    ╔════ INFO ════╗
+    let menu = `╔════ INFO ════╗
       ▸ User    : ${config.OWNER_NAME}
       ▸ Bot     : ${config.BOT_NAME || 'NOVA XMD'}
       ▸ Mode    : ${config.MODE || 'PUBLIC'}
@@ -109,12 +104,12 @@ cmd({
 
     // ===== CATEGORY SECTIONING (YOUR CHOSEN STYLE) =====
     for (const cat of Object.keys(categories).sort()) {
-      const emoji = emojiByCategory[cat] || '📌';
+      const emoji = emojiByCategory[cat] || '🔁';
       const catUpper = cat.toUpperCase();
       
       // Create category box
       menu += `\n                  
-    ┌── ${emoji} ${catUpper} ${emoji} ──┐`;
+    ┌─ ${emoji} ${catUpper} ${emoji} ─┐`;
       
       // Add all commands in this category
       for (const cmdName of categories[cat].sort()) {
