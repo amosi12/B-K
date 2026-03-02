@@ -85,12 +85,6 @@
       "value": "NOVA-XMD"
     },
 
-    "MENU_IMAGE_URL": {
-      "description": "add url for mention reply and menu if want.",
-      "required": false,
-      "value": "https://files.catbox.moe/mxb907.jpg"
-    },
-
     "DESCRIPTION": {
       "description": "add caption for menu and other",
       "required": false,
