@@ -1,116 +1,143 @@
-const { cmd } = require("../command");
+const { cmd } = require('../command');
 const config = require("../config");
 
-const recentCallers = new Set();
+// Store warnings and settings
+global.warnings = global.warnings || {};
+const linkSettings = {
+enabled: config.ANTI_LINK === 'true',
+whitelist: [],
+maxWarnings: 3,
+deleteMessage: true,
+warnMessage: true,
+removeUser: true
+};
 
-// Anti-call event handler
-cmd({ on: "body" }, async (client, message, chat, { from: sender }) => {
-  try {
-    client.ev.on("call", async (callData) => {
-      if (!config.ANTI_CALL) return;
-
-      for (const call of callData) {
-        if (call.status === 'offer' && !call.isGroup) {
-          await client.rejectCall(call.id, call.from);
-          
-          if (!recentCallers.has(call.from)) {
-            recentCallers.add(call.from);
-            
-            await client.sendMessage(call.from, {
-              text: "_📞 Auto Reject Call Mode Activated ☠️ No Calls Allowed_",
-              mentions: [call.from]
-            });
-            
-            setTimeout(() => recentCallers.delete(call.from), 600000);
-          }
-        }
-      }
-    });
-  } catch (error) {
-    console.error("Call rejection error:", error);
-    await client.sendMessage(sender, { text: "⚠️ Error: " + error.message }, { quoted: chat });
-  }
-});
-
-// Anti-call command with combined image+newsletter response
 cmd({
-    pattern: "anticall",
-    alias: ["callblock", "togglecall"],
-    desc: "Toggle call blocking feature",
-    category: "owner",
-    react: "📞",
-    filename: __filename,
-    fromMe: true
-},
-async (client, message, m, { isOwner, from, sender, args, prefix }) => {
-    try {
-        if (!isOwner) {
-            return client.sendMessage(from, { 
-                text: "🚫 Owner-only command",
-                mentions: [sender]
-            }, { quoted: message });
-        }
+pattern: 'antilink',
+desc: 'Toggle anti-link feature',
+category: 'group',
+use: '<on/off>'
+}, async (conn, m, _, { isGroup, isBotAdmins, isAdmins, reply }) => {
 
-        const action = args[0]?.toLowerCase() || 'status';
-        let statusText, reaction = "📞", additionalInfo = "";
+if (!isGroup) return reply('❌ This command only works in groups');
+if (!isAdmins) return reply('❌ Only group admins can use this command');
+if (!isBotAdmins) return reply('❌ I must be admin to control links');
 
-        switch (action) {
-            case 'on':
-                if (config.ANTI_CALL) {
-                    statusText = "Anti-call is already *enabled*✅";
-                    reaction = "ℹ️";
-                } else {
-                    config.ANTI_CALL = true;
-                    statusText = "Anti-call has been *enabled*!";
-                    reaction = "✅";
-                    additionalInfo = "Calls will be automatically rejected🔇";
-                }
-                break;
-                
-            case 'off':
-                if (!config.ANTI_CALL) {
-                    statusText = "Anti-call is already *disabled*📳!";
-                    reaction = "ℹ️";
-                } else {
-                    config.ANTI_CALL = false;
-                    statusText = "Anti-call has been *disabled📛*!";
-                    reaction = "❌";
-                    additionalInfo = "Calls will be accepted";
-                }
-                break;
-                
-            default:
-                statusText = `Anti-call Status: ${config.ANTI_CALL ? "✅ *ENABLED*" : "❌ *DISABLED*"}`;
-                additionalInfo = config.ANTI_CALL ? "Calls are being blocked" : "Calls are allowed";
-                break;
-        }
+const action = m.text?.toLowerCase()?.split(' ')[1];
 
-        // Send the combined message with image and newsletter info
-        await client.sendMessage(from, {
-            image: { url: "https://files.catbox.moe/ktr7qs.jpg" },
-            caption: `${statusText}\n\n${additionalInfo}\n\n_Nova-Xmd_`,
-            contextInfo: {
-                mentionedJid: [sender],
-                forwardingScore: 999,
-                isForwarded: true,
-                forwardedNewsletterMessageInfo: {
-                    newsletterJid: '120363382023564830@newsletter',
-                    newsletterName: 'Nova-Xmd',
-                    serverMessageId: 143
-                }
-            }
-        }, { quoted: message });
+if (action === 'on') {
+    linkSettings.enabled = true;
+    return reply('✅ Anti-link protection enabled');
+} 
+else if (action === 'off') {
+    linkSettings.enabled = false;
+    return reply('❌ Anti-link protection disabled');
+} 
+else {
+    return reply(`Current status: ${linkSettings.enabled ? '✅ ON' : '❌ OFF'}\nUsage: .antilink on / off`);
+}
 
-        // Add reaction to original message
-        await client.sendMessage(from, {
-            react: { text: reaction, key: message.key }
-        });
-
-    } catch (error) {
-        console.error("Anti-call command error:", error);
-        await client.sendMessage(from, {
-            text: `⚠️ Error: ${error.message}`,
-            mentions: [sender]
-        }, { quoted: message });
-    }
 });
+
+cmd({
+on: 'text'
+}, async (conn, m, _, { from, text, sender, isGroup, isAdmins, isBotAdmins }) => {
+
+try {
+
+    if (!isGroup) return;
+    if (!linkSettings.enabled) return;
+    if (isAdmins) return;
+    if (!isBotAdmins) return;
+
+    const messageText = text || m.body || "";
+
+    const linkPatterns = [
+        /https?:\/\/[^\s]+/gi,
+        /www\.[^\s]+/gi,
+        /chat\.whatsapp\.com\/\S+/gi,
+        /wa\.me\/\S+/gi,
+        /t\.me\/\S+/gi,
+        /youtu\.?be(?:\.com)?\/\S+/gi,
+        /instagram\.com\/\S+/gi,
+        /facebook\.com\/\S+/gi,
+        /twitter\.com\/\S+/gi,
+        /x\.com\/\S+/gi,
+        /tiktok\.com\/\S+/gi,
+        /discord\.gg\/\S+/gi
+    ];
+
+    const isWhitelisted = linkSettings.whitelist.some(domain =>
+        messageText.toLowerCase().includes(domain.toLowerCase())
+    );
+
+    const containsLink = !isWhitelisted &&
+        linkPatterns.some(pattern => pattern.test(messageText));
+
+    if (!containsLink) return;
+
+    console.log(`[ANTI-LINK] Link detected from ${sender}`);
+
+    // Delete message
+    if (linkSettings.deleteMessage) {
+        try {
+            await conn.sendMessage(from, { delete: m.key });
+        } catch (err) {
+            console.log("[ANTI-LINK] Failed to delete message");
+        }
+    }
+
+    // Add warning
+    global.warnings[sender] = (global.warnings[sender] || 0) + 1;
+    const warningCount = global.warnings[sender];
+
+    if (linkSettings.warnMessage) {
+
+        await conn.sendMessage(from, {
+            text:
+            `⚠️ *LINK DETECTED*\n\n` +
+            `👤 User: @${sender.split('@')[0]}\n` +
+            `⚠️ Warning: ${warningCount}/${linkSettings.maxWarnings}\n\n` +
+            `🚫 Links are not allowed in this group`,
+            mentions: [sender]
+        }, { quoted: m });
+
+    }
+
+    if (linkSettings.removeUser && warningCount >= linkSettings.maxWarnings) {
+
+        try {
+
+            await conn.groupParticipantsUpdate(from, [sender], "remove");
+
+            await conn.sendMessage(from, {
+                text: `🚫 @${sender.split('@')[0]} removed for sending links`,
+                mentions: [sender]
+            });
+
+            delete global.warnings[sender];
+
+        } catch (error) {
+
+            await conn.sendMessage(from, {
+                text: `⚠️ Failed to remove @${sender.split('@')[0]} (check admin permissions)`,
+                mentions: [sender]
+            });
+
+        }
+
+    }
+
+} catch (error) {
+
+    console.error("[ANTI-LINK ERROR]", error);
+
+}
+
+});
+
+// Reset warnings every 24 hours
+setInterval(() => {
+global.warnings = {};
+console.log('[ANTI-LINK] Warnings reset');
+}, 24 * 60 * 60 * 1000);
