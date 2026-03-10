@@ -85,7 +85,7 @@ async function loadSession() {
         return false;
     }
 
-    // FORMAT 1: POPKID~ (compressed base64)
+    // FORMAT 1: Bmb~ (compressed base64)
     if (config.SESSION_ID.startsWith("NOVA~")) {
         console.log("📥 Detected NOVA~ format session");
         const compressedBase64 = config.SESSION_ID.substring("NOVA~".length);
@@ -97,7 +97,7 @@ async function loadSession() {
                 const gunzip = promisify(zlib.gunzip);
                 const decompressedBuffer = await gunzip(compressedBuffer);
                 fs.writeFileSync(credsPath, decompressedBuffer.toString('utf-8'));
-                console.log("✅ Session loaded successfully from POPKID~ format");
+                console.log("✅ Session loaded successfully from Bmb~ format");
                 return true;
             } else {
                 console.log("⚠️ Not a valid GZIP compressed buffer");
@@ -138,7 +138,7 @@ async function loadSession() {
     
     // Unknown format
     else {
-        console.log("⚠️ Unknown SESSION_ID format. Use POPKID~ or NOVA~. QR code will be shown.");
+        console.log("⚠️ Unknown SESSION_ID format. Use Bmb~ or NOVA~. QR code will be shown.");
         return false;
     }
 }
@@ -229,8 +229,8 @@ async function connectToWA() {
               require("./plugins/" + plugin)
             }
           })
-          console.log('Plugins installed successful ✅')
-          console.log('Bot connected to whatsapp ✅')
+          console.log('Plugins installed successfully ✅')
+          console.log('Bot connected to WhatsApp ✅')
           const startMess = {
             image: { url: 'https://files.catbox.moe/yz5yle.jpg' },
             caption: `
@@ -308,7 +308,7 @@ async function connectToWA() {
         ? mek.message.ephemeralMessage.message 
         : mek.message
       
-      // ✅ STATUS HANDLER
+      // ✅ STATUS HANDLER - MODIFIED: SINGLE EMOJI ONLY "🤝"
       if (mek.key && mek.key.remoteJid === 'status@broadcast') {
         
         // 1. Auto-read status
@@ -317,7 +317,7 @@ async function connectToWA() {
           console.log(`📖 Status seen from: ${mek.key.participant}`)
         }
         
-        // 2. Auto-react to status
+        // 2. Auto-react to status - SINGLE EMOJI ONLY "🤝" (like the first code)
         if (config.AUTO_STATUS_REACT === "true") {
           
           const now = Date.now()
@@ -327,76 +327,12 @@ async function connectToWA() {
             try {
               const botJid = conn.user.id.split(':')[0] + '@s.whatsapp.net'
               
-              const emojiMap = {
-                "hello": ["👋", "🙂", "😊", "👋🏽"],
-                "hi": ["👋", "🙂", "😊", "👋🏻"],
-                "morning": ["🌅", "🌞", "☀️", "🌤️"],
-                "night": ["🌙", "🌜", "⭐", "✨"],
-                "love": ["❤️", "💖", "😍", "🥰", "💗"],
-                "thanks": ["🙏", "😊", "💖", "🙏🏽"],
-                "happy": ["😊", "😁", "🎉", "🥳"],
-                "sad": ["😢", "😭", "💔", "🥺"],
-                "congrats": ["🎉", "🎊", "👏", "🎈"],
-                "good": ["👍", "👌", "😊", "✅"],
-                "wow": ["😮", "🤯", "😲", "😳"],
-                "cool": ["😎", "🆒", "✨", "🔥"],
-                "birthday": ["🎂", "🎉", "🥳", "🎁"],
-                "pray": ["🙏", "🤲", "🛐", "☪️"],
-                "work": ["💼", "👔", "📊", "📈"],
-                "food": ["🍕", "🍔", "🍜", "🥗"],
-                "travel": ["✈️", "🚗", "🌍", "🧳"],
-                "sport": ["⚽", "🏀", "🏈", "🎯"],
-                "music": ["🎵", "🎶", "🎧", "🎤"],
-                "party": ["🎉", "🥳", "🎊", "🪅"]
-              }
-
-              const fallbackEmojis = [
-                '🌼', '❤️', '💐', '🔥', '🏵️', '❄️', '🧊', '🐳', '💥', '🥀', '❤‍🔥', '🥹', '😩', '🫣', 
-                '🤭', '👻', '👾', '🫶', '😻', '🙌', '🫂', '🫀', '👩‍🦰', '🧑‍🦰', '👩‍⚕️', '🧑‍⚕️', '🧕', 
-                '👩‍🏫', '👨‍💻', '👰‍♀', '🦹🏻‍♀️', '🧟‍♀️', '🧟', '🧞‍♀️', '🧞', '🙅‍♀️', '💁‍♂️', '💁‍♀️', '🙆‍♀️', 
-                '🙋‍♀️', '🤷', '🤷‍♀️', '🤦', '🤦‍♀️', '💇‍♀️', '💇', '💃', '🚶‍♀️', '🚶', '🧶', '🧤', '👑', 
-                '💍', '👝', '💼', '🎒', '🥽', '🐻', '🐼', '🐭', '🐣', '🪿', '🦆', '🦊', '🦋', '🦄', 
-                '🪼', '🐋', '🐳', '🦈', '🐍', '🕊️', '🦦', '🦚', '🌱', '🍃', '🎍', '🌿', '☘️', '🍀', 
-                '🍁', '🪺', '🍄', '🍄‍🟫', '🪸', '🪨', '🌺', '🪷', '🪻', '🥀', '🌹', '🌷', '💐', '🌾', 
-                '🌸', '🌼', '🌻', '🌝', '🌚', '🌕', '🌎', '💫', '🔥', '☃️', '❄️', '🌨️', '🫧', '🍟', 
-                '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', '🎗️', '🤹', '🤹‍♀️', '🎧', '🎤', 
-                '🥁', '🧩', '🎯', '🚀', '🚁', '🗿', '🎙️', '⌛', '⏳', '💸', '💎', '⚙️', '⛓️', '🔪', 
-                '🧸', '🎀', '🪄', '🎈', '🎁', '🎉', '🏮', '🪩', '📩', '💌', '📤', '📦', '📊', '📈', 
-                '📑', '📉', '📂', '🔖', '🧷', '📌', '📝', '🔏', '🔐', '🩷', '❤️', '🧡', '💛', '💚', 
-                '🩵', '💙', '💜', '🖤', '🩶', '🤍', '🤎', '❤‍🔥', '❤‍🩹', '💗', '💖', '💘', '💝', '❌', 
-                '✅', '🔰', '〽️', '🌐', '🌀', '⤴️', '⤵️', '🔴', '🟢', '🟡', '🟠', '🔵', '🟣', '⚫', 
-                '⚪', '🟤', '🔇', '🔊', '📢', '🔕', '♥️', '🕐', '🚩', '🇵🇰', '🇹🇿', '🇰🇪', '🇺🇬', '🇷🇼'
-              ]
-
-              const getEmojiForStatus = (statusText) => {
-                if (!statusText) return fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)]
-                
-                const words = statusText.toLowerCase().split(/\s+/)
-                for (const word of words) {
-                  const emojis = emojiMap[word]
-                  if (emojis && emojis.length > 0) {
-                    return emojis[Math.floor(Math.random() * emojis.length)]
-                  }
-                }
-                return fallbackEmojis[Math.floor(Math.random() * fallbackEmojis.length)]
-              }
-
-              let statusText = ''
-              if (mek.message.conversation) {
-                statusText = mek.message.conversation
-              } else if (mek.message.extendedTextMessage) {
-                statusText = mek.message.extendedTextMessage.text
-              } else if (mek.message.imageMessage?.caption) {
-                statusText = mek.message.imageMessage.caption
-              } else if (mek.message.videoMessage?.caption) {
-                statusText = mek.message.videoMessage.caption
-              }
-
-              const selectedEmoji = getEmojiForStatus(statusText)
+              // SINGLE EMOJI ONLY - 🤝 (REMOVED ALL THE OTHER EMOJIS)
+              const statusEmoji = "🤝"
               
               await conn.sendMessage('status@broadcast', {
                 react: {
-                  text: selectedEmoji,
+                  text: statusEmoji,
                   key: mek.key
                 }
               }, { 
@@ -405,7 +341,7 @@ async function connectToWA() {
 
               statusReactCache.set(mek.key.participant, now)
               
-              console.log(`✅ Status reaction sent: ${selectedEmoji} to ${mek.key.participant}`)
+              console.log(`✅ Status reaction sent: ${statusEmoji} to ${mek.key.participant}`)
               
             } catch (reactError) {
               console.error('❌ Status react error:', reactError.message)
@@ -516,7 +452,7 @@ async function connectToWA() {
         return
       }
       
-      //================ownerreact==============
+      //================owner react==============
       if (senderNumber.includes("255741752020") && !isReact) {
         const reactions = ["👑", "🥳", "📊", "⚙️", "🧠", "🎯", "✨", "🔑", "🏆", "👻", "🎉", "💗", "❤️", "😜", "🌼", "🏵️", ,"💐", "🔥", "❄️", "🌝", "🌟", "🐥", "🧊"]
         const randomReaction = reactions[Math.floor(Math.random() * reactions.length)]
