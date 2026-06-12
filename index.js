@@ -490,7 +490,7 @@ async function connectToWA() {
           '🪼', '🐋', '🐳', '🦈', '🐍', '🕊️', '🦦', '🦚', '🌱', '🍃', '🎍', '🌿', '☘️', '🍀', 
           '🍁', '🪺', '🍄', '🍄‍🟫', '🪸', '🪨', '🌺', '🪷', '🪻', '🥀', '🌹', '🌷', '💐', '🌾', 
           '🌸', '🌼', '🌻', '🌝', '🌚', '🌕', '🌎', '💫', '🔥', '☃️', '❄️', '🌨️', '🫧', '🍟', 
-          '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', '🎗️', '🤹', '🤹‍♀️', '🎧', '🎤', 
+          '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', 'BIT', '🤹', '🤹‍♀️', '🎧', '🎤', 
           '🥁', '🧩', '🎯', '🚀', '🚁', '🗿', '🎙️', '⌛', '⏳', '💸', '💎', '⚙️', '⛓️', '🔪', 
           '🧸', '🎀', '🪄', '🎈', '🎁', '🎉', '🏮', '🪩', '📩', '💌', '📤', '📦', '📊', '📈', 
           '📑', '📉', '📂', '🔖', '🧷', '📌', '📝', '🔏', '🔐', '🩷', '❤️', '🧡', '💛', '💚', 
@@ -899,25 +899,34 @@ async function connectToWA() {
         { quoted },
       )
     }
-    // Status aka brio
-    conn.setStatus = status => {
-      conn.query({
-        tag: 'iq',
-        attrs: {
-          to: '@s.whatsapp.net',
-          type: 'set',
-          xmlns: 'status',
-        },
-        content: [
-          {
-            tag: 'status',
-            attrs: {},
-            content: Buffer.from(status, 'utf-8'),
+
+    // Status aka brio (FIXED BY BMB TECH)
+    conn.setStatus = async (status) => {
+      try {
+        if (!conn || !conn.user || conn.ws?.readyState !== 1) {
+          return;
+        }
+        await conn.query({
+          tag: 'iq',
+          attrs: {
+            to: '@s.whatsapp.net',
+            type: 'set',
+            xmlns: 'status',
           },
-        ],
-      })
-      return status
+          content: [
+            {
+              tag: 'status',
+              attrs: {},
+              content: Buffer.from(status, 'utf-8'),
+            },
+          ],
+        });
+        return status;
+      } catch (e) {
+        console.error("❌ Bio update query error:", e.message);
+      }
     }
+
     conn.serializeM = mek => sms(conn, mek, store)
   } catch (error) {
     console.error('Error in connectToWA:', error)
