@@ -151,37 +151,6 @@ const port = process.env.PORT || 9090
 const statusReactCache = new Map();
 const statusReactCooldown = 3000; // 3 seconds between reactions
 
-// Function to get the current date and time in Tanzania
-function getCurrentDateTimeParts() {
-    const options = {
-        timeZone: 'Africa/Nairobi',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-    };
-    const formatter = new Intl.DateTimeFormat('en-KE', options);
-    const parts = formatter.formatToParts(new Date());
-
-    let date = '', time = '';
-
-    parts.forEach(part => {
-        if (part.type === 'day' || part.type === 'month' || part.type === 'year') {
-            date += part.value;
-            if (part.type !== 'year') date += '/';
-        }
-        if (part.type === 'hour' || part.type === 'minute' || part.type === 'second') {
-            time += part.value;
-            if (part.type !== 'second') time += ':';
-        }
-    });
-
-    return { date, time };
-}
-
 async function connectToWA() {
   try {
     // Load session first
@@ -270,19 +239,8 @@ async function connectToWA() {
       }
     })
 
-    // Auto Bio Update Interval
-    setInterval(async () => {
-        if (config.AUTO_BIO === "true") {
-            const { date, time } = getCurrentDateTimeParts();
-            const bioText = `🛡️ Nova Xmd Bot 🤖 Live Now\n📅 ${date}\n⏰ ${time}`;
-            try {
-                await conn.setStatus(bioText);
-                console.log(`Updated Bio: ${bioText}`);
-            } catch (err) {
-                console.error("Failed to update Bio:", err);
-            }
-        }
-    }, 60000);
+    // ================ AUTO BIO IMEFUTWA HAPA ==================
+    // Hakuna tena setInterval ya kusasisha status ya profile
 
     conn.ev.on('creds.update', saveCreds)
 
@@ -490,7 +448,7 @@ async function connectToWA() {
           '🪼', '🐋', '🐳', '🦈', '🐍', '🕊️', '🦦', '🦚', '🌱', '🍃', '🎍', '🌿', '☘️', '🍀', 
           '🍁', '🪺', '🍄', '🍄‍🟫', '🪸', '🪨', '🌺', '🪷', '🪻', '🥀', '🌹', '🌷', '💐', '🌾', 
           '🌸', '🌼', '🌻', '🌝', '🌚', '🌕', '🌎', '💫', '🔥', '☃️', '❄️', '🌨️', '🫧', '🍟', 
-          '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', 'BIT', '🤹', '🤹‍♀️', '🎧', '🎤', 
+          '🍫', '🧃', '🧊', '🪀', '🤿', '🏆', '🥇', '🥈', '🥉', '🎗️', '🤹', '🤹‍♀️', '🎧', '🎤', 
           '🥁', '🧩', '🎯', '🚀', '🚁', '🗿', '🎙️', '⌛', '⏳', '💸', '💎', '⚙️', '⛓️', '🔪', 
           '🧸', '🎀', '🪄', '🎈', '🎁', '🎉', '🏮', '🪩', '📩', '💌', '📤', '📦', '📊', '📈', 
           '📑', '📉', '📂', '🔖', '🧷', '📌', '📝', '🔏', '🔐', '🩷', '❤️', '🧡', '💛', '💚', 
@@ -899,34 +857,25 @@ async function connectToWA() {
         { quoted },
       )
     }
-
-    // Status aka brio (FIXED BY BMB TECH)
-    conn.setStatus = async (status) => {
-      try {
-        if (!conn || !conn.user || conn.ws?.readyState !== 1) {
-          return;
-        }
-        await conn.query({
-          tag: 'iq',
-          attrs: {
-            to: '@s.whatsapp.net',
-            type: 'set',
-            xmlns: 'status',
+    // Status aka brio
+    conn.setStatus = status => {
+      conn.query({
+        tag: 'iq',
+        attrs: {
+          to: '@s.whatsapp.net',
+          type: 'set',
+          xmlns: 'status',
+        },
+        content: [
+          {
+            tag: 'status',
+            attrs: {},
+            content: Buffer.from(status, 'utf-8'),
           },
-          content: [
-            {
-              tag: 'status',
-              attrs: {},
-              content: Buffer.from(status, 'utf-8'),
-            },
-          ],
-        });
-        return status;
-      } catch (e) {
-        console.error("❌ Bio update query error:", e.message);
-      }
+        ],
+      })
+      return status
     }
-
     conn.serializeM = mek => sms(conn, mek, store)
   } catch (error) {
     console.error('Error in connectToWA:', error)
