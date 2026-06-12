@@ -119,8 +119,5 @@ AUTO_BIO: process.env.AUTO_BIO || "false",
 
 CHAT_BOT: process.env.CHAT_BOT || "false",
 // make true if you want AI chatbot responses enabled
-
-CHAT_BOT_GROUPS: process.env.CHAT_BOT_GROUPS || "false"
-// set to "true" to allow the chatbot to auto-reply inside group chats
 };
     
