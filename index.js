@@ -202,7 +202,7 @@ async function connectToWA() {
           console.log('Bot connected to whatsapp ✅')
           
           const startMess = {
-            image: { url: 'https://files.catbox.moe/yz5yle.jpg' },
+            image: { url: 'https://url.bmbxmd.workers.dev/1N0H3G.jpg' },
             caption: `◈━━━━━━━━━━━━━━━━◈
 │❒ *Evening vibes! Let's get to it!*
 │❒ Welcome back to *Nova Xmd*! Connection established.
