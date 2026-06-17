@@ -3,8 +3,17 @@ const FormData = require('form-data');
 const { cmd } = require("../command");
 const { sendButtons } = require("gifted-btns");
 
-// ✅ API ya BMB
 const BMB_API = 'https://url.bmbtech.site/api/upload';
+
+// ✅ Kazi ya kuzalisha herufi 6 random (A-Z, 0-9)
+function generateShortId(length = 6) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+}
 
 cmd({
   pattern: "url",
@@ -23,7 +32,6 @@ cmd({
       throw "❌ Please reply to an image, video, or audio file.";
     }
 
-    // ✅ Pakua media kama buffer (hatuandishi temp file)
     const mediaBuffer = await quotedMsg.download();
 
     if (mediaBuffer.length > 100 * 1024 * 1024) {
@@ -41,16 +49,16 @@ cmd({
     else if (mimeType.includes('application')) extension = '.pdf';
     if (!extension) extension = '.bin';
 
-    const filename = `bmb_${Date.now()}${extension}`;
+    // ✅ Jina la faili: herufi 6 random + extension
+    const shortId = generateShortId(6); // kama "EAYINY"
+    const filename = `${shortId}${extension}`; // "EAYINY.png"
 
-    // ✅ Tengeneza FormData kwa BMB
     const form = new FormData();
     form.append('file', mediaBuffer, {
       filename: filename,
       contentType: mimeType
     });
 
-    // ✅ Tuma kwa BMB API
     const response = await axios.post(BMB_API, form, {
       headers: form.getHeaders(),
       timeout: 60000
@@ -61,7 +69,8 @@ cmd({
       throw "Upload failed. BMB did not return a valid URL.";
     }
 
-    const mediaUrl = data.url;
+    const mediaUrl = data.url; // Sasa itakuwa "https://url.bmbtech.site/EAYINY.png"
+
     let mediaType = 'File';
     if (mimeType.includes('image')) mediaType = 'Image';
     else if (mimeType.includes('video')) mediaType = 'Video';
@@ -74,10 +83,10 @@ cmd({
       "```========================```" + "\n" +
       `📁 TYPE   : ${mediaType}\n` +
       `📦 SIZE   : ${fileSizeMB} MB\n` +
+      `🔑 SHORT  : ${shortId}\n` +
       `🌐 LINK   :\n${mediaUrl}\n` +
       "```========================```";
 
-    // ✅ Tuma ujumbe na buttons (Copy + View Channel)
     await sendButtons(client, message.chat, {
       title: "",
       text: textMessage,
