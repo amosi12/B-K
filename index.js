@@ -23,7 +23,7 @@ const {
 } = require('@whiskeysockets/baileys')
 
 const l = console.log
-const { getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, fetchJson, normalizeJid } = require('./lib/functions')
+const { getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, fetchJson } = require('./lib/functions')
 const { AntiDelDB, initializeAntiDeleteSettings, setAnti, getAnti, getAllAntiDeleteSettings, saveContact, loadMessage, getName, getChatSummary, saveGroupMetadata, getGroupMetadata, saveMessageCount, getInactiveGroupMembers, getGroupMembersMessageCount, saveMessage } = require('./data')
 const fs = require('fs')
 const ff = require('fluent-ffmpeg')
@@ -45,6 +45,7 @@ const os = require('os')
 const Crypto = require('crypto')
 const path = require('path')
 const prefix = config.PREFIX
+const events = require('./command') // Ili kupata commands.length
 
 const ownerNumber = ['255767862457', '255741752020']
 
@@ -151,37 +152,6 @@ const port = process.env.PORT || 9090
 const statusReactCache = new Map();
 const statusReactCooldown = 3000; // 3 seconds between reactions
 
-// Function to get the current date and time in Tanzania
-function getCurrentDateTimeParts() {
-    const options = {
-        timeZone: 'Africa/Nairobi',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false,
-    };
-    const formatter = new Intl.DateTimeFormat('en-KE', options);
-    const parts = formatter.formatToParts(new Date());
-
-    let date = '', time = '';
-
-    parts.forEach(part => {
-        if (part.type === 'day' || part.type === 'month' || part.type === 'year') {
-            date += part.value;
-            if (part.type !== 'year') date += '/';
-        }
-        if (part.type === 'hour' || part.type === 'minute' || part.type === 'second') {
-            time += part.value;
-            if (part.type !== 'second') time += ':';
-        }
-    });
-
-    return { date, time };
-}
-
 async function connectToWA() {
   try {
     // Load session first
@@ -233,25 +203,18 @@ async function connectToWA() {
           
           const startMess = {
             image: { url: 'https://files.catbox.moe/yz5yle.jpg' },
-            caption: `
-───────────────────────────
-───────────────────────────
-╔═〘 𝗡𝗢𝗩𝗔 ✦ 𝗫𝗠𝗗 𝗕𝗢𝗧 〙═╗
-║ 💬 Prefix      : ${config.PREFIX}
-║
-║ 🧠 Repos  : github.com/novaxmd
-║
-║ ⚡ Status      : Connected
-║
-║ 👑 Website      : bmbtech.online
-║
-║ ⭐ Support     : Fork ⭐ & Star 🔥
-║
-╚═〘 Powered by ${config.OWNER_NAME} 💻 〙═╝
-────────────────────────────
-────────────────────────────
+            caption: `◈━━━━━━━━━━━━━━━━◈
+│❒ *Evening vibes! Let's get to it!*
+│❒ Welcome back to *Nova Xmd*! Connection established.
 
-> *© ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝙽𝙾𝚅𝙰 ᴛᴇᴄʜ*`,
+✨ *Bot Name*: *Nova Xmd*
+🔧 *Mode*: ${config.MODE}
+➡️ *Prefix*: ${config.PREFIX}
+📦 *Pugins*: ${events.commands.length}
+
+🌐 *Website by Bmb Tech*
+🔗 bmbtech.zone.id
+◈━━━━━━━━━━━━━━━━◈`,
             contextInfo: {
               forwardingScore: 5,
               isForwarded: true,
@@ -270,19 +233,7 @@ async function connectToWA() {
       }
     })
 
-    // Auto Bio Update Interval
-    setInterval(async () => {
-        if (config.AUTO_BIO === "true") {
-            const { date, time } = getCurrentDateTimeParts();
-            const bioText = `🛡️ Nova Xmd Bot 🤖 Live Now\n📅 ${date}\n⏰ ${time}`;
-            try {
-                await conn.setStatus(bioText);
-                console.log(`Updated Bio: ${bioText}`);
-            } catch (err) {
-                console.error("Failed to update Bio:", err);
-            }
-        }
-    }, 60000);
+    // ========== AUTO BIO REMOVED ==========
 
     conn.ev.on('creds.update', saveCreds)
 
@@ -410,20 +361,19 @@ async function connectToWA() {
       const q = args.join(' ')
       const text = args.join(' ')
       const isGroup = from.endsWith('@g.us')
-      const rawSender = mek.key.fromMe ? (conn.user.id.split(':')[0]+'@s.whatsapp.net' || conn.user.id) : (mek.key.participant || mek.key.remoteJid)
-      const sender = normalizeJid(rawSender)
+      const sender = mek.key.fromMe ? (conn.user.id.split(':')[0]+'@s.whatsapp.net' || conn.user.id) : (mek.key.participant || mek.key.remoteJid)
       const senderNumber = sender.split('@')[0]
       const botNumber = conn.user.id.split(':')[0]
       const pushname = mek.pushName || 'Gon'
       const isMe = botNumber.includes(senderNumber)
       const isOwner = ownerNumber.includes(senderNumber) || isMe
-      const botNumber2 = normalizeJid(await jidNormalizedUser(conn.user.id))
+      const botNumber2 = await jidNormalizedUser(conn.user.id)
       const groupMetadata = isGroup ? await conn.groupMetadata(from).catch(e => {}) : ''
       const groupName = isGroup ? groupMetadata.subject : ''
       const participants = isGroup ? await groupMetadata.participants : ''
       const groupAdmins = isGroup ? await getGroupAdmins(participants) : ''
-      const isBotAdmins = isGroup ? groupAdmins.includes(normalizeJid(botNumber2)) : false
-      const isAdmins = isGroup ? groupAdmins.includes(normalizeJid(sender)) : false
+      const isBotAdmins = isGroup ? groupAdmins.includes(botNumber2) : false
+      const isAdmins = isGroup ? groupAdmins.includes(sender) : false
       const isReact = m.message.reactionMessage ? true : false
       const reply = (teks) => {
         conn.sendMessage(from, { text: teks }, { quoted: mek })
@@ -516,7 +466,7 @@ async function connectToWA() {
       if(!isOwner && !isGroup && config.MODE === "groups") return
    
       // take commands 
-      const events = require('./command')
+      // const events = require('./command') // tayari imeletwa juu
       const cmdName = isCmd ? body.slice(1).trim().split(" ")[0].toLowerCase() : false
       if (isCmd) {
         const cmd = events.commands.find((cmd) => cmd.pattern === (cmdName)) || events.commands.find((cmd) => cmd.alias && cmd.alias.includes(cmdName))
