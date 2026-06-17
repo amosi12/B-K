@@ -51,14 +51,8 @@ PREFIX: process.env.PREFIX || ".",
 BOT_NAME: process.env.BOT_NAME || "NOVA-XMD",
 // add bot namw here for menu
 
-STICKER_NAME: process.env.STICKER_NAME || "NOVA-XMD",
-// type sticker pack name 
-
 CUSTOM_REACT: process.env.CUSTOM_REACT || "false",
 // make this true for custum emoji react    
-
-CUSTOM_REACT_EMOJIS: process.env.CUSTOM_REACT_EMOJIS || "💝,💖,💗,❤️‍🩹,❤️,🧡,💛,💚,💙,💜,🤎,🖤,🤍",
-// chose custom react emojis by yourself
 
 OWNER_NUMBER: process.env.OWNER_NUMBER || "255767862457",
 // add your bot owner number
@@ -113,9 +107,6 @@ ANTI_VV: process.env.ANTI_VV || "true",
 
 AUTO_RECORDING: process.env.AUTO_RECORDING || "false",
 // make it true for auto recoding 
-
-AUTO_BIO: process.env.AUTO_BIO || "false",
-// make true if you want bot to auto-update bio/status
 
 CHAT_BOT: process.env.CHAT_BOT || "false",
 // make true if you want AI chatbot responses enabled
