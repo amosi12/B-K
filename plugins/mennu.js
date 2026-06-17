@@ -81,9 +81,9 @@ cmd({
 
     // ===== HEADER WITH DESIGN =====
     let menu = `
-╭════════════════════════♧
+╭═══════════════════♧
 ║ ✨ *𝗡𝗢𝗩𝗔 𝗫𝗠𝗗 𝗕𝗢𝗧* ✨
-╠════════════════════════♧
+╠═══════════════════♧
 ║
 ║ 👤 *USER:* ${config.OWNER_NAME}
 ║ 🚀 *PLUGINS:* ${commands.length}
@@ -92,7 +92,7 @@ cmd({
 ║ 📊 *RAM:* ${memoryUsage}MB
 ║ 🌐 *MODE:* ${config.MODE}
 ║
-╰════════════════════════♧`;
+╰═══════════════════♧`;
 
     // Group commands by category
     const categories = {};
@@ -110,9 +110,9 @@ cmd({
       const emoji = emojiByCategory[cat] || '🔁';
       const catUpper = cat.toUpperCase();
       
-      menu += `\n\n╭════════════════════════♧
+      menu += `\n\n╭═══════════════════♧
 ║ ${emoji} *${catUpper}*
-╠════════════════════════♧
+╠═══════════════════♧
 ║`;
       
       // Append all commands belonging to this category
@@ -121,7 +121,7 @@ cmd({
       }
       
       // Close category layout block
-      menu += `\n║\n╰════════════════════════♡`;
+      menu += `\n║\n╰═══════════════════♡`;
     }
 
     // ===== DYNAMIC RANDOM IMAGE PICKER =====
