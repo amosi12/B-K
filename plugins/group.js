@@ -19,6 +19,7 @@ cmd(muteCommand, async (client, message, args, {
   isBotAdmins,
   isDev,
   pushname,
+  sender,
   reply
 }) => {
   try {
@@ -37,8 +38,8 @@ cmd(muteCommand, async (client, message, args, {
     // Send combined message with image
     await client.sendMessage(chatId, {
       image: imageBuffer,
-      caption: `*🔇 GROUP MUTED*\n\n• Action by: @${message.sender.split('@')[0]}\n• Admin: ${pushname}\n\nOnly admins can now send messages.`,
-      mentions: [message.sender],
+      caption: `*🔇 GROUP MUTED*\n\n• Action by: @${sender.split('@')[0]}\n• Admin: ${pushname}\n\nOnly admins can now send messages.`,
+      mentions: [sender],
       contextInfo: {
         forwardingScore: 999,
         isForwarded: true,
@@ -76,6 +77,7 @@ cmd(unmuteCommand, async (client, message, args, {
   isBotAdmins,
   isDev,
   pushname,
+  sender,
   reply
 }) => {
   try {
@@ -94,8 +96,8 @@ cmd(unmuteCommand, async (client, message, args, {
     // Send combined message with image
     await client.sendMessage(chatId, {
       image: imageBuffer,
-      caption: `*🔊 GROUP UNMUTED*\n\n• Action by: @${message.sender.split('@')[0]}\n• Admin: ${pushname}\n\nAll members can now send messages.`,
-      mentions: [message.sender],
+      caption: `*🔊 GROUP UNMUTED*\n\n• Action by: @${sender.split('@')[0]}\n• Admin: ${pushname}\n\nAll members can now send messages.`,
+      mentions: [sender],
       contextInfo: {
         forwardingScore: 999,
         isForwarded: true,
