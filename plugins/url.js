@@ -3,7 +3,7 @@ const FormData = require('form-data');
 const { cmd } = require("../command");
 const { sendButtons } = require("gifted-btns");
 
-const BMB_API = 'https://url.bmbtech.site/api/upload';
+const BMB_API = 'https://url.bmbxmd.workers.dev/api/upload';
 
 // ✅ Kazi ya kuzalisha herufi 6 random (A-Z, 0-9)
 function generateShortId(length = 6) {
