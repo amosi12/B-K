@@ -19,7 +19,7 @@ const quotedContact = {
 VERSION:3.0
 FN:NOVA XMD VERIFIED ✅
 ORG:NOVA XMD;
-TEL;type=CELL;type=VOICE;waid=${config.DEV}:+${config.config.DEV}
+TEL;type=CELL;type=VOICE;waid=${config.DEV}:+${config.DEV}
 END:VCARD`
     }
   }
