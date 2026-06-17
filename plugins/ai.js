@@ -11,7 +11,7 @@ cmd(
     pattern: "gpt",
     alias: ["gpt5", "ai5", "bmbgpt", "ai"],
     desc: "Interact with GPT-5 AI",
-    category: "ai",
+    category: "download",
     react: "🤖",
     filename: __filename
   },
