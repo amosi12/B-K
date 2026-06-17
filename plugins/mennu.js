@@ -79,17 +79,20 @@ cmd({
     // Get bot memory usage
     const memoryUsage = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
 
-    // ===== HEADER WITH NEW STYLE =====
+    // ===== HEADER WITH DESIGN =====
     let menu = `
-    ╔════ INFO ════╗
-      ▸ User    : ${config.OWNER_NAME}
-      ▸ Bot     : ${config.BOT_NAME || 'NOVA XMD'}
-      ▸ Mode    : ${config.MODE || 'PUBLIC'}
-      ▸ Prefix  : ${prefix}
-      ▸ Commands: ${commands.length}
-      ▸ Uptime  : ${uptime()}
-      ▸ Memory  : ${memoryUsage} MB
-    ╚══════════════╝`;
+╭════════════════════════♧
+║ ✨ *𝗡𝗢𝗩𝗔 𝗫𝗠𝗗 𝗕𝗢𝗧* ✨
+╠════════════════════════♧
+║
+║ 👤 *USER:* ${config.OWNER_NAME}
+║ 🚀 *PLUGINS:* ${commands.length}
+║ ⏳ *UPTIME:* ${uptime()}
+║ 📅 *DATE:* ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+║ 📊 *RAM:* ${memoryUsage}MB
+║ 🌐 *MODE:* ${config.MODE}
+║
+╰════════════════════════♧`;
 
     // Group commands by category
     const categories = {};
@@ -97,41 +100,57 @@ cmd({
       if (c.category && !c.dontAdd && c.pattern) {
         const cat = normalize(c.category);
         if (!categories[cat]) categories[cat] = [];
-        // Get the main command name (first one if multiple with |)
         const cmdName = c.pattern.split('|')[0];
         categories[cat].push(cmdName);
       }
     }
 
-    // ===== CATEGORY SECTIONING (YOUR CHOSEN STYLE) =====
+    // ===== CATEGORIES SECTIONS =====
     for (const cat of Object.keys(categories).sort()) {
       const emoji = emojiByCategory[cat] || '🔁';
       const catUpper = cat.toUpperCase();
       
-      // Create category box
-      menu += `\n                  
-    ┌─ ${emoji} ${catUpper} ${emoji} ─┐`;
+      menu += `\n\n╭════════════════════════♧
+║ ${emoji} *${catUpper}*
+╠════════════════════════♧
+║`;
       
-      // Add all commands in this category
+      // Append all commands belonging to this category
       for (const cmdName of categories[cat].sort()) {
-        menu += `\n      → ${cmdName}`;
+        menu += `\n║ ◇ .${cmdName}`;
       }
       
-      // Close the box
-      menu += `\n    └──────────┘`;
+      // Close category layout block
+      menu += `\n║\n╰════════════════════════♡`;
     }
 
-    // ===== FOOTER =====
-    menu += `\n                  
-╚══════════════════╝
-📌 *TOTAL COMMANDS:* ${commands.length}
-> Powered By *Bmb Tech Bot*`;
+    // ===== DYNAMIC RANDOM IMAGE PICKER =====
+    const folderPath = path.join(__dirname, '../plugins');
+    let menuImage;
 
-    // ===== SEND MENU WITH IMAGE =====
+    if (fs.existsSync(folderPath)) {
+      // Read all files inside plugins folder and filter for image extensions
+      const files = fs.readdirSync(folderPath).filter(file => 
+        /\.(jpe?g|png|webp)$/i.test(file)
+      );
+
+      if (files.length > 0) {
+        // Pick one random image file from the available array
+        const randomImageFile = files[Math.floor(Math.random() * files.length)];
+        const imagePath = path.join(folderPath, randomImageFile);
+        menuImage = fs.readFileSync(imagePath);
+      } else {
+        return reply(`❌ Error: No valid image files (.jpg, .png, .webp) found inside the plugins directory.`);
+      }
+    } else {
+      return reply(`❌ Error: The plugins directory could not be resolved.`);
+    }
+
+    // ===== SEND MENU WITH LOCAL BUFFER IMAGE =====
     await conn.sendMessage(
       from,
       {
-        image: { url: config.MENU_IMAGE_URL || 'https://i.ibb.co/Hfm7K7QF/IMG-20260302-WA0004.jpg' },
+        image: menuImage,
         caption: menu,
         contextInfo: {
           mentionedJid: [sender],
@@ -154,7 +173,6 @@ cmd({
 });
 
 // ===== ADD COMMAND INFO COMMAND =====
-// This allows users to get info about specific commands
 cmd({
   pattern: 'cmdinfo',
   alias: ['cinfo', 'commandinfo'],
