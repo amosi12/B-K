@@ -28,19 +28,14 @@ cmd({
   category: "group",
   filename: __filename,
 },
-async (conn, mek, m, { from, quoted, body, args, q, isGroup, sender, reply }) => {
+async (conn, mek, m, { from, quoted, body, args, q, isGroup, sender, isAdmins, isBotAdmins, reply }) => {
   try {
     if (!isGroup) return reply("❌ This feature is only for *groups*.");
 
-    const senderNumber = sender.split('@')[0];
-    const botNumber = conn.user.id.split(':')[0];
-    const metadata = await conn.groupMetadata(from);
-    const groupAdmins = metadata.participants.filter(p => p.admin);
-    const isBotAdmins = groupAdmins.some(admin => admin.id === botNumber + '@s.whatsapp.net');
-    const isAdmins = groupAdmins.some(admin => admin.id === sender);
-
     if (!isBotAdmins) return reply("❌ Bot needs to be an admin.");
     if (!isAdmins) return reply("❌ You must be an admin to use this command.");
+
+    const metadata = await conn.groupMetadata(from);
 
     const code = await conn.groupInviteCode(from);
     if (!code) return reply("❌ Failed to get the group invite link.");
