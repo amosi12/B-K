@@ -11,21 +11,17 @@ cmd({
     use: '.tagall [message]',
     filename: __filename
 },
-async (conn, mek, m, { from, participants, reply, isGroup, isAdmins, isCreator, prefix, command, args, body }) => {
+async (conn, mek, m, { from, participants, reply, isGroup, senderNumber, groupAdmins, prefix, command, args, body }) => {
     try {
-        // ✅ Group check
-        if (!isGroup) {
-            await conn.sendMessage(from, { react: { text: '❌', key: m.key } });
-            return reply("❌ This command can only be used in groups.");
-        }
+        if (!isGroup) return reply("❌ This command can only be used in groups.");
 
-        // ✅ Permission check (Admin OR Bot Owner)
-        if (!isAdmins && !isCreator) {
-            await conn.sendMessage(from, { react: { text: '❌', key: m.key } });
+        const botOwner = conn.user.id.split(":")[0]; // Extract bot owner's number
+        const senderJid = senderNumber + "@s.whatsapp.net";
+
+        if (!groupAdmins.includes(senderJid) && senderNumber !== botOwner) {
             return reply("❌ Only group admins or the bot owner can use this command.");
         }
 
-        // ✅ Fetch group info
         let groupInfo = await conn.groupMetadata(from).catch(() => null);
         if (!groupInfo) return reply("❌ Failed to fetch group information.");
 
@@ -36,9 +32,8 @@ async (conn, mek, m, { from, participants, reply, isGroup, isAdmins, isCreator, 
         let emojis = ['📢', '🔊', '🌐', '🔰', '❤‍🩹', '🤍', '🖤', '🩵', '📝', '💗', '🔖', '🪩', '📦', '🎉', '🛡️', '💸', '⏳', '🗿', '🚀', '🎧', '🪀', '⚡', '🚩', '🍁', '🗣️', '👻', '⚠️', '🔥'];
         let randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-        // ✅ Extract message
         let message = body.slice(body.indexOf(command) + command.length).trim();
-        if (!message) message = "Attention Everyone";
+        if (!message) message = "Attention Everyone"; // Default message
 
         let teks = `▢ Group : *${groupName}*\n▢ Members : *${totalMembers}*\n▢ Message: *${message}*\n\n┌───⊷ *MENTIONS*\n`;
 
@@ -47,36 +42,49 @@ async (conn, mek, m, { from, participants, reply, isGroup, isAdmins, isCreator, 
             teks += `${randomEmoji} @${mem.id.split('@')[0]}\n`;
         }
 
-        teks += "└──✪ *Nova Xmd* ✪──";
+        teks += "└──★⚡️ Nova ┃ Xmd ⚡️★──";
 
-        // ✅ Send message with NEWSLETTER JID and EXTERNAL AD REPLY
-        await conn.sendMessage(from, { 
-            text: teks, 
-            mentions: participants.map(a => a.id),
-            contextInfo: {
-                isForwarded: true,
-                forwardingScore: 999,
-                forwardedNewsletterMessageInfo: {
-                    newsletterJid: "120363382023564830@newsletter",  // ✅ NEWSLETTER JID
-                    newsletterName: "B.M.B TECH",                     // ✅ NEWSLETTER NAME
-                    serverMessageId: 1
-                },
-                externalAdReply: {
-                    title: "Nova Xmd Bot ⚡",
-                    body: "Tagall • Newsletter • Group Manager",
-                    thumbnailUrl: "https://files.catbox.moe/yz5yle.jpg",  // ✅ Your thumbnail
-                    mediaType: 1,
-                    renderSmallThumbnail: true,
-                    sourceUrl: "https://whatsapp.com/channel/0029VawO6hgF6sn7k3SuVU3z" // Optional
+        let fakeContact = {
+            key: {
+                fromMe: false,
+                participant: '0@s.whatsapp.net',
+                remoteJid: 'status@broadcast'
+            },
+            message: {
+                contactMessage: {
+                    displayName: 'NOVA XMD ✅',
+                    vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:PKDRILLER ✅\nORG:PK-XMD;\nTEL;type=CELL;type=VOICE;waid=255767862457:+255767862457\nEND:VCARD`,
+                    jpegThumbnail: null
                 }
             }
-        }, { quoted: mek });
+        }
 
-        // ✅ React with newsletter emoji
-        await conn.sendMessage(from, { react: { text: '📨', key: m.key } });
+        await conn.sendMessage(from, {
+            text: teks,
+            mentions: participants.map(a => a.id),
+            contextInfo: {
+                externalAdReply: {
+                    title: "GROUP PINGER",
+                    body: "Powered by Bmbtech",
+                    thumbnailUrl: "https://url.bmbxmd.workers.dev/N0PJHH.jpg",
+                    sourceUrl: "https://github.com/novaxmd",
+                    mediaType: 1,
+                    renderLargerThumbnail: false,
+                    showAdAttribution: true
+                },
+                forwardingScore: 999,
+                isForwarded: true,
+                forwardedNewsletterMessageInfo: {
+                    newsletterJid: "120363382023564830@newsletter",
+                    newsletterName: "Nova Xmd Bot Updates",
+                    serverMessageId: "",
+                }
+            }
+        }, { quoted: fakeContact });
 
     } catch (e) {
         console.error("TagAll Error:", e);
         reply(`❌ *Error Occurred !!*\n\n${e.message || e}`);
     }
 });
+                      
