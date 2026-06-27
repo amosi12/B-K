@@ -21,7 +21,7 @@ cmd({
     if (!code) return reply("❌ Please provide a country code. Example: `.check 255`");
     code = code.replace(/\+/g, '');
 
-    const url = "https://country-code-1-hmla.onrender.com/countries"; // API yako
+    const url = "https://nova-countries-site-web.vercel.app/countries";
     const { data } = await axios.get(url);
 
     const matchingCountries = data.filter(country => country.calling_code === code);
