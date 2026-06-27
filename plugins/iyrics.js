@@ -1,37 +1,102 @@
+const axios = require("axios");
 const { cmd } = require("../command");
-const fetch = require("node-fetch");
 
-const lyricsCmd = {
-  pattern: "lyrics", // fixed typo
-  alias: ["lyric"],
-  desc: "Get song lyrics",
-  category: "download",
-  use: "<song title>"
-};
+/* ===== API CONFIG ===== */
+const LYRICS_API = "https://iamtkm.vercel.app/search/lyrics";
+const API_KEY = "tkm";
 
-cmd(lyricsCmd, async (_dest, _zk, _commandOptions, { text, prefix, command, reply }) => {
-  if (!text) {
-    return reply(
-      "Please provide a song title.\nExample: *" + prefix + command + " robbery*"
-    );
-  }
+/* ===== COMMAND ===== */
+cmd(
+  {
+    pattern: "lyrics",
+    alias: ["lyric", "song", "songtxt"],
+    desc: "Search and fetch song lyrics by title and/or artist",
+    category: "search",
+    filename: __filename
+  },
+  async (conn, mek, m, { from, args, reply }) => {
 
-  const query = encodeURIComponent(text);
-  const apiUrl = `https://some-random-api.com/lyrics?title=${query}`;
-
-  try {
-    const res = await fetch(apiUrl);
-    const data = await res.json();
-
-    if (!data.lyrics) {
-      return reply("❌ Lyrics not found.");
+    /* ===== HELP ===== */
+    if (!args[0] || args[0].toLowerCase() === "help") {
+      return reply(
+        "🎵 *B.M.B LYRICS*\n\n" +
+        "📌 *Usage:*\n" +
+        "• .lyrics song name\n" +
+        "• .lyrics Blinding Lights\n" +
+        "• .lyrics Bohemian Rhapsody Queen\n\n" +
+        "💡 *Tip:* Enter song title + artist"
+      );
     }
 
-    let message = `🎵 *${data.title}*\n👤 Artist: ${data.author}\n> *© ᴘᴏᴡᴇʀᴇᴅ ʙʏ 𝙽𝙾𝚅𝙰-𝚇𝙼𝙳*💫\n\n📄 *Lyrics:*\n${data.lyrics}`;
+    const query = args.join(" ");
 
-    await reply(message.trim());
-  } catch (err) {
-    console.error(err);
-    reply("❌ Failed to fetch lyrics. Try again later.");
+    try {
+      /* ===== REACT ===== */
+      await conn.sendMessage(from, {
+        react: { text: "⏳", key: mek.key }
+      });
+
+      /* ===== API REQUEST ===== */
+      const res = await axios.get(LYRICS_API, {
+        params: {
+          apikey: API_KEY,
+          song: query
+        },
+        timeout: 35000
+      });
+
+      const data = res.data;
+
+      /* ===== PARSE RESPONSE ===== */
+      let title = "";
+      let artist = "";
+      let lyrics = "";
+
+      if (data?.status && data.result) {
+        title = data.result.title || data.result.song || "";
+        artist = data.result.artist || "";
+        lyrics = data.result.lyrics || data.result.text || "";
+      } else if (data?.lyrics) {
+        lyrics = data.lyrics;
+        title = data.title || query;
+        artist = data.artist || "";
+      } else if (data?.result) {
+        lyrics = typeof data.result === "string" ? data.result : JSON.stringify(data.result);
+      } else {
+        return reply("❌ Lyrics not found. Try again.");
+      }
+
+      if (!lyrics) {
+        return reply("❌ Lyrics not available for: " + query);
+      }
+
+      /* ===== TRIM IF TOO LONG ===== */
+      if (lyrics.length > 3000) {
+        lyrics = lyrics.slice(0, 3000) + "\n\n...truncated";
+      }
+
+      /* ===== FINAL MESSAGE ===== */
+      let text = "🎵 *B.M.B LYRICS*\n\n";
+
+      if (title) text += `🎼 *Wimbo:* ${title}\n`;
+      if (artist) text += `🎤 *Msanii:* ${artist}\n`;
+
+      text +=
+        "\n━━━━━━━━━━━━━━━━\n\n" +
+        `${lyrics}\n\n` +
+        "━━━━━━━━━━━━━━━━\n" +
+        "⚡ *Powered by Nova Xmd*";
+
+      await conn.sendMessage(from, { text }, { quoted: mek });
+
+    } catch (err) {
+      console.error("LYRICS ERROR:", err.response?.data || err);
+      reply(
+        "❌ *Lyrics Error*\n\n" +
+        "• API may be down\n" +
+        "• Try again later.\n" +
+        "• Enter the correct song name."
+      );
+    }
   }
-});
+);
