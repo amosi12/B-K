@@ -116,9 +116,9 @@ async function loadSession() {
     // Inaweza kuwa na prefix "B.M.B-TECH;;;;" au isiwe nayo
     let sessionData = config.SESSION_ID;
     
-    if (sessionData.startsWith("Nova-Xmd")) {
+    if (sessionData.startsWith("Nova-Xmd~")) {
         console.log("📥 Detected Bmb-Tech prefix format");
-        sessionData = sessionData.replace(/Nova-Xmd/g, "");
+        sessionData = sessionData.replace(/Nova-Xmd~/g, "");
     } else {
         console.log("📥 Detected Plain Base64 format (treating as bmb style)");
     }
