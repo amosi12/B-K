@@ -86,32 +86,8 @@ async function loadSession() {
         return false;
     }
 
-    // FORMAT 1: NOVA~ (compressed base64)
-    if (config.SESSION_ID.startsWith("NOVA~")) {
-        console.log("📥 Detected NOVA~ format session");
-        const compressedBase64 = config.SESSION_ID.substring("NOVA~".length);
-        try {
-            const compressedBuffer = Buffer.from(compressedBase64, 'base64');
-            
-            // Check if it's GZIP compressed
-            if (compressedBuffer[0] === 0x1f && compressedBuffer[1] === 0x8b) {
-                const gunzip = promisify(zlib.gunzip);
-                const decompressedBuffer = await gunzip(compressedBuffer);
-                fs.writeFileSync(credsPath, decompressedBuffer.toString('utf-8'));
-                console.log("✅ Session loaded successfully from NOVA~ format");
-                return true;
-            } else {
-                console.log("⚠️ Not a valid GZIP compressed buffer");
-                return false;
-            }
-        } catch (error) { 
-            console.error("❌ Failed to load NOVA~ session:", error.message);
-            return false; 
-        }
-    }
-    
-    // FORMAT 2: MEGA~ (MEGA.nz)
-    else if (config.SESSION_ID.startsWith("MEGA~")) {
+    // ========== FORMAT 1: MEGA~ (MEGA.nz) ==========
+    if (config.SESSION_ID.startsWith("MEGA~")) {
         console.log("📥 Detected MEGA~ format session");
         const sessdata = config.SESSION_ID.replace("MEGA~", '');
         
@@ -136,13 +112,34 @@ async function loadSession() {
         }
     }
     
-    // Unknown format
-    else {
-        console.log("⚠️ Unknown SESSION_ID format. Use NOVA~ or MEGA~. QR code will be shown.");
+    // ========== FORMAT 2: B.M.B-TECH style (Plain Base64) ==========
+    // Inaweza kuwa na prefix "B.M.B-TECH;;;;" au isiwe nayo
+    let sessionData = config.SESSION_ID;
+    
+    if (sessionData.startsWith("Nova-Xmd")) {
+        console.log("📥 Detected Bmb-Tech prefix format");
+        sessionData = sessionData.replace(/Nova-Xmd/g, "");
+    } else {
+        console.log("📥 Detected Plain Base64 format (treating as bmb style)");
+    }
+
+    try {
+        // Decode base64 to JSON string (sawa na atob())
+        const credsJson = Buffer.from(sessionData, 'base64').toString('utf-8');
+        
+        // Thibitisha kuwa ni JSON sahihi (ili tusiandike data potofu)
+        JSON.parse(credsJson);
+        
+        // Andika kwenye faili ya creds.json
+        fs.writeFileSync(credsPath, credsJson, 'utf-8');
+        console.log("✅ Session loaded successfully from Plain Base64 (B.M.B style)");
+        return true;
+    } catch (error) {
+        console.error("❌ Failed to decode Base64 session:", error.message);
         return false;
     }
 }
-  
+
 const express = require("express")
 const app = express()
 const port = process.env.PORT || 9090
